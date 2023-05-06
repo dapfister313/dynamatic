@@ -3,6 +3,7 @@ add_dynamatic_library(DynamaticTransforms
   FlattenMemRefRowMajor.cpp
   HandshakePrepareForLegacy.cpp
   HandshakeInferBasicBlocks.cpp
+  HandshakeSimplify.cpp
   NameMemoryOps.cpp
   PushConstants.cpp
 

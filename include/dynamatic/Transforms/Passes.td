@@ -39,6 +39,14 @@ def HandshakePrepareForLegacy : Pass<"handshake-prepare-for-legacy", "mlir::Modu
   let constructor = "dynamatic::createHandshakePrepareForLegacy()";
 }
 
+def HandshakeSimplify : Pass<"handshake-simplify", "mlir::ModuleOp"> {
+  let summary = "Simplifies stuff.";
+  let description = [{
+    Much simplification.  
+  }];
+  let constructor = "dynamatic::createHandshakeSimplify()";
+}
+
 //===----------------------------------------------------------------------===//
 // Other passes
 //===----------------------------------------------------------------------===//
