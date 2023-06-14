@@ -64,6 +64,7 @@ option(LLVM_BUILD_TOOLS "Build the LLVM tools. If OFF, just generate build targe
 
 set(DYNAMATIC_SOURCE_DIR ${CMAKE_SOURCE_DIR})
 set(DYNAMATIC_INCLUDE_DIR ${DYNAMATIC_SOURCE_DIR}/include)
+set(DYNAMATIC_TUTORIALS_DIR ${DYNAMATIC_SOURCE_DIR}/tutorials)
 
 set(DYNAMATIC_BINARY_DIR ${CMAKE_BINARY_DIR})
 set(DYNAMATIC_TOOLS_DIR ${DYNAMATIC_BINARY_DIR}/bin)
@@ -100,3 +101,4 @@ add_subdirectory(${DYNAMATIC_SOURCE_DIR}/experimental)
 add_subdirectory(${DYNAMATIC_SOURCE_DIR}/lib)
 add_subdirectory(${DYNAMATIC_SOURCE_DIR}/test)
 add_subdirectory(${DYNAMATIC_SOURCE_DIR}/tools)
+add_subdirectory(${DYNAMATIC_TUTORIALS_DIR})
