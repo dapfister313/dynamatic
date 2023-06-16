@@ -4,8 +4,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "CreatingAPass/Transforms/SimpleTransform.h"
-#include "CreatingAPass/Transforms/PassDetails.h"
+#include "CreatingPasses/Transforms/SimpleTransform.h"
+#include "CreatingPasses/Transforms/PassDetails.h"
 #include "circt/Dialect/Handshake/HandshakeOps.h"
 #include "mlir/IR/MLIRContext.h"
 

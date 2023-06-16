@@ -22,7 +22,7 @@ class HandshakeDialect;
 namespace dynamatic {
 namespace tutorials {
 #define GEN_PASS_CLASSES
-#include "CreatingAPass/Transforms/Passes.h.inc"
+#include "CreatingPasses/Transforms/Passes.h.inc"
 } // namespace tutorials
 } // namespace dynamatic
 

@@ -1,2 +1,2 @@
-# Creating a pass tutorial
-add_subdirectory(CreatingAPass)
+# Creating passes tutorial
+add_subdirectory(CreatingPasses)
