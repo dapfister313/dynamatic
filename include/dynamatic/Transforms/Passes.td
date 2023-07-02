@@ -144,9 +144,14 @@ def PushConstants : Pass<"push-constants", "mlir::ModuleOp"> {
 def PlaceBuffers : Pass<"place-buffers", "mlir::ModuleOp"> {
   let summary = "Insert Buffers in Data flow graphs.";
   let description = [{
-   
+    This pass insert buffers in the data flow graph.
   }];
   let constructor = "dynamatic::createHandshakePlaceBuffersPass()";
+  let options = [
+    Option<"firstMG", "firstMG", "bool", "false",
+    "if true, only extract the first MG from the input file">,
+    Option<"stdLevelInfo", "std-level-info", "std::string", "",
+    "if true, extract CFDFC from standard level simluation">];
 }
 
 def HandshakeOptimizeBits : Pass<"optimize-bits" , "mlir::ModuleOp"> {

@@ -6,13 +6,18 @@
         // Dynamatic
         "${workspaceFolder}/include/",
         "${workspaceFolder}/build/include/",
+        // Dynamatic (experimental) 
+        "${workspaceFolder}/experimental/include/",
+        "${workspaceFolder}/build/experimental/include/",
         // CIRCT
         "${workspaceFolder}/circt/include/",
         "${workspaceFolder}/circt/build/include/",
         "${workspaceFolder}/circt/llvm/llvm/include/",
         "${workspaceFolder}/circt/llvm/mlir/include/",
         "${workspaceFolder}/circt/llvm/build/include/",
-        "${workspaceFolder}/circt/llvm/build/tools/mlir/include/"
+        "${workspaceFolder}/circt/llvm/build/tools/mlir/include/",
+        // GUROBI
+        "/opt/gurobi1001/linux64/include/"
       ],
       "intelliSenseMode": "linux-clang-x64",
       "compilerPath": "/usr/bin/clang",
