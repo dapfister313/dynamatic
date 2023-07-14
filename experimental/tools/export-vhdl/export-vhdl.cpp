@@ -14,9 +14,19 @@
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/SourceMgr.h"
 
+
 using namespace llvm;
 using namespace mlir;
 using namespace circt;
+
+void traverseIRFromOperation(mlir::Operation *op, int k = 0) {
+  for (mlir::Region &region : op->getRegions())
+    for (mlir::Block &block : region.getBlocks()) 
+      for (mlir::Operation &nestedOp : block.getOperations()) {
+        llvm::outs() << k << ") " << "Traversing operation " << op << "\n";
+        traverseIRFromOperation(&nestedOp, k++);
+      }
+}
 
 static cl::OptionCategory mainCategory("Application options");
 
@@ -54,11 +64,39 @@ int main(int argc, char **argv) {
   mlir::OwningOpRef<mlir::ModuleOp> module(
       mlir::parseSourceFile<ModuleOp>(sourceMgr, &context));
   if (!module)
-    return 1;
+    return 1;            
 
   // Just print the @name of all external hardware modules in the input
-  for (auto extModOp : module->getOps<hw::HWModuleExternOp>()) {
-    llvm::outs() << extModOp.getVerilogModuleName() << "\n";
+
+  int k = 0;
+  for (auto extModOp : module->getOps<hw::HWModuleExternOp>()) {   
+    llvm::outs() << "-------------------\n" << ++k << ")" << "\n";     
+    auto s = extModOp.getVerilogModuleName();
+    StringRef p("_in_\0");
+    size_t flag = 0;
+    if (s.find(StringRef("handshake")) >= s.size()) {
+      flag = 1;
+    }
+    auto first = s.find('_', 0);
+    ++first;
+    auto second = s.find(p, 0);
+    if (second >= s.size()) {
+      s = StringRef("start\0");
+    } else {
+      s = s.substr(first, second - first);
+    }
+    llvm::outs() << "The component's characteristic: ";
+    if (flag) {
+      llvm::outs() << "arithmetic,\n";
+    } else {
+      llvm::outs() << "dataflow,\n";
+    }
+    llvm::outs() << "The component's type: " << s << ",\n";
+    llvm::outs() << "Number of inputs: " << extModOp.getNumInputs() << ", these are: " << extModOp.getArgNames() << " "
+      << "with types: " << extModOp.getArgumentTypes() << " respectively,\n";
+    llvm::outs() << "Number of outputs: " << extModOp.getNumOutputs() << ", these are: " << extModOp.getResultNames() << " " 
+      << "with types: " << extModOp.getResultTypes() << " respectively.\n";
+    llvm::outs() << "-------------------" << "\n";
 
     // TODO look at the attributes/operands of each external module and
     // identify:
