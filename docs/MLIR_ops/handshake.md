@@ -30,7 +30,7 @@
 ---  
 ----------------------
 # 1. Mutual schemes
-## 1. ###handshake.[name]
+## 1. handshake.[name]
 ### buffer (2.3)
 ```
 ### handshake.buffer
@@ -97,7 +97,7 @@
 - array of request types (load/store):
 - number of outputs:
 ``` 
-## 2. ###arith.[name]
+## 2. arith.[name]
 ### 1. datawidth
 ``` mlir
 - datawidth:

@@ -197,12 +197,63 @@ static std::string getTypeName(Type type, Location loc) {
   return "";
 }
 
+// Arith units
+namespace arith_comp {
+  std::string
+  addf = "arith_addf",
+  addi = "arith_addi",
+  andi = "arith_andi",
+  bitcast = "arith_bitcast",
+  ceildivsi = "arith_ceildivsi",
+  ceildivui = "arith_ceildivui",
+  divf = "arith_divf",
+  divsi = "arith_divsi",
+  divui = "arith_divui",
+  floordivsi = "arith_floordivsi",
+  maxf = "arith_maxf",
+  maxsi = "arith_maxsi",
+  maxui = "arith_maxui",
+  minf = "arith_minf",
+  minsi = "arith_minsi",
+  minui = "arith_minui",
+  mulf = "arith_mulf",
+  muli = "arith_muli",
+  negf = "arith_negf",
+  ori = "arith_ori",
+  remf = "arith_remf",
+  remsi = "arith_remsi",
+  remui = "arith_remui",
+  shli = "arith_shli",
+  shrsi = "arith_shrsi",
+  shrui = "arith_shrui",
+  subf = "arith_subf",
+  subi = "arith_subi",
+  xori = "arith_xori";
+
+};
+
 /// Constructs an external module name corresponding to an operation. The
 /// returned name is unique with respect to the operation's discriminating
 /// types.
 static std::string getExtModuleName(Operation *oldOp) {
   std::string extModName = getBareExtModuleName(oldOp);
-
+  auto [inTypes, outTypes] = getDiscriminatingTypes(oldOp);
+/*
+  if (extModName == arith_comp::addf || extModName == arith_comp::addi || extModName == arith_comp::andi ||
+  extModName == arith_comp::bitcast || extModName == arith_comp::ceildivsi || extModName == arith_comp::ceildivui ||
+  extModName == arith_comp::divf || extModName == arith_comp::divsi || extModName == arith_comp::divui ||
+  extModName == arith_comp::floordivsi  || extModName == arith_comp::maxf || extModName == arith_comp::maxsi ||
+  extModName == arith_comp::maxui || extModName == arith_comp::minf  || extModName == arith_comp::minsi ||
+  extModName == arith_comp::minui || extModName == arith_comp::mulf || extModName == arith_comp::muli  ||
+  extModName == arith_comp::negf || extModName == arith_comp::ori || extModName == arith_comp::remf || 
+  extModName == arith_comp::remsi || extModName == arith_comp::remui || extModName == arith_comp::shli || 
+  extModName == arith_comp::shrsi || extModName == arith_comp::shrui || extModName == arith_comp::subf || 
+  extModName == arith_comp::subi || extModName == arith_comp::xori
+  ) {
+    extModName += getTypeName(*inTypes.begin(), oldOp->getLoc());
+  }
+  */
+/*
   // Add value of the constant operation
   if (auto constOp = dyn_cast<handshake::ConstantOp>(oldOp)) {
     if (auto intAttr = constOp.getValue().dyn_cast<IntegerAttr>()) {
@@ -220,11 +271,14 @@ static std::string getExtModuleName(Operation *oldOp) {
     else
       oldOp->emitError("unsupported constant type");
   }
+  */
+/*
 
   // Add discriminating input and output types
   auto [inTypes, outTypes] = getDiscriminatingTypes(oldOp);
   if (!inTypes.empty())
     extModName += "_in";
+
   for (auto inType : inTypes)
     extModName += getTypeName(inType, oldOp->getLoc());
 
@@ -238,7 +292,7 @@ static std::string getExtModuleName(Operation *oldOp) {
     extModName += "_" + stringifyEnum(cmpOp.getPredicate()).str();
   if (auto cmpOp = dyn_cast<mlir::arith::CmpFOp>(oldOp))
     extModName += "_" + stringifyEnum(cmpOp.getPredicate()).str();
-
+*/
   return extModName;
 }
 

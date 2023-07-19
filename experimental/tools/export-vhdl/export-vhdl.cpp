@@ -32,6 +32,54 @@ void traverseIRFromOperation(mlir::Operation *op, int k = 0) {
         traverseIRFromOperation(&nestedOp, k++);
       }
 }
+
+
+//////////// getExtModuleName \\\\\\\\\\\\\
+
+/// Constructs an external module name corresponding to an operation. The
+/// returned name is unique with respect to the operation's discriminating
+/// types.
+static std::string getExtModuleName(Operation *oldOp) {
+  std::string extModName = getBareExtModuleName(oldOp);
+
+  // Add value of the constant operation
+  if (auto constOp = dyn_cast<handshake::ConstantOp>(oldOp)) {
+    if (auto intAttr = constOp.getValue().dyn_cast<IntegerAttr>()) {
+      auto intType = intAttr.getType();
+
+      if (intType.isSignedInteger())
+        extModName += "_c" + std::to_string(intAttr.getSInt());
+      else if (intType.isUnsignedInteger())
+        extModName += "_c" + std::to_string(intAttr.getUInt());
+      else
+        extModName += "_c" + std::to_string((uint64_t)intAttr.getInt());
+    } else if (auto floatAttr = constOp.getValue().dyn_cast<FloatAttr>())
+      extModName +=
+          "_c" + std::to_string(floatAttr.getValue().convertToFloat());
+    else
+      oldOp->emitError("unsupported constant type");
+  }
+
+  // Add discriminating input and output types
+  auto [inTypes, outTypes] = getDiscriminatingTypes(oldOp);
+  if (!inTypes.empty())
+    extModName += "_in";
+  for (auto inType : inTypes)
+    extModName += getTypeName(inType, oldOp->getLoc());
+
+  if (!outTypes.empty())
+    extModName += "_out";
+  for (auto outType : outTypes)
+    extModName += getTypeName(outType, oldOp->getLoc());
+
+  // Add comparison type for comparison operations
+  if (auto cmpOp = dyn_cast<mlir::arith::CmpIOp>(oldOp))
+    extModName += "_" + stringifyEnum(cmpOp.getPredicate()).str();
+  if (auto cmpOp = dyn_cast<mlir::arith::CmpFOp>(oldOp))
+    extModName += "_" + stringifyEnum(cmpOp.getPredicate()).str();
+
+  return extModName;
+}
 */
 
 namespace
@@ -170,11 +218,16 @@ int main(int argc, char **argv) {
       if (s[counter] == '_' && counter < out) {
         inputs.push_back(s.substr(prev, counter));
         prev = counter;
+      } else if (s[counter] == '_' && counter >= out) {
+        outputs.push_back(s.substr(prev, counter));
+        prev = counter;
+      } else {
+
       }
       counter++;
     }
     if (in < s.size()) {
-      
+      //
     }
     if (out < s.size()) {
       //
@@ -182,14 +235,14 @@ int main(int argc, char **argv) {
 
 
 
+
+
+
+
     if (s == dcomponents::fork || s == dcomponents::lazy_fork) {
       auto n_o = extModOp.getNumOutputs();
       mlir::Type dw = extModOp.getResultTypes()[0];
-      
-      
-      
 
-      
       llvm::outs() << "- number of outputs: " << n_o << "\n";
       llvm::outs() << "- datawidth: " << dw << "\n";
     } else 
