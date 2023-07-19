@@ -10,6 +10,7 @@
 
 #include "dynamatic/Conversion/StandardToHandshakeFPGA18.h"
 #include "circt/Dialect/Handshake/HandshakeOps.h"
+#include "dynamatic/Analysis/ConstantAnalysis.h"
 #include "dynamatic/Conversion/PassDetails.h"
 #include "dynamatic/Support/LogicBB.h"
 #include "mlir/Dialect/Affine/Analysis/AffineAnalysis.h"
@@ -312,7 +313,7 @@ HandshakeLoweringFPGA18::connectConstants(ConversionPatternRewriter &rewriter) {
     rewriter.setInsertionPointAfter(cstOp);
     auto cstVal = cstOp.getValue();
 
-    if (llvm::all_of(cstOp->getUsers(), cstUserIsSourcable))
+    if (isCstSourcable(cstOp))
       rewriter.replaceOpWithNewOp<handshake::ConstantOp>(
           cstOp, cstVal.getType(), cstVal,
           rewriter.create<handshake::SourceOp>(cstOp.getLoc(),
