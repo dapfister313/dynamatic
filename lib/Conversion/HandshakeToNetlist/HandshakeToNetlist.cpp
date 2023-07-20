@@ -197,9 +197,41 @@ static std::string getTypeName(Type type, Location loc) {
   return "";
 }
 
+// Dataflow units
+namespace handshake_comp {
+  std::string
+
+  buffer = "handshake_buffer",
+
+  fork = "handshake_fork",
+  lazy_fork = "handshake_lazy_fork",
+
+  merge = "handshake_merge",
+  mux = "handshake_mux",
+  control_merge = "handshake_control_merge",
+
+  br = "handshake_br",
+  cond_br = "handshake_cond_br",
+  sink = "handshake_sink",
+  source = "handshake_source",
+  d_load = "handshake_d_load",
+  d_store = "handshake_d_store",
+
+  constant = "handshake_constant",
+
+  join = "handshake_join",
+  d_return = "handshake_d_return",
+  end = "handshake_end",
+
+  sync = "handshake_sync",
+
+  mem_controller = "handshake_mem_controller";
+}
+
 // Arith units
 namespace arith_comp {
   std::string
+
   addf = "arith_addf",
   addi = "arith_addi",
   andi = "arith_andi",
@@ -228,7 +260,21 @@ namespace arith_comp {
   shrui = "arith_shrui",
   subf = "arith_subf",
   subi = "arith_subi",
-  xori = "arith_xori";
+  xori = "arith_xori",
+
+  cmpf = "arith_cmpf",
+  cmpi = "arith_cmpi",
+  c_select = "arith_select",
+
+  extf =  "arith_extf",
+  extsi = "arith_extsi",
+  extui = "arith_extui",
+  fptosi = "arith_fptosi",
+  fptoui = "arith_fptoui",
+  sitofp = "arith_sitofp",
+  truncf = "arith_truncf",
+  trunci = "arith_trunci",
+  uitofp = "arith_uitofp";
 
 };
 
@@ -236,9 +282,11 @@ namespace arith_comp {
 /// returned name is unique with respect to the operation's discriminating
 /// types.
 static std::string getExtModuleName(Operation *oldOp) {
+  
   std::string extModName = getBareExtModuleName(oldOp);
   auto [inTypes, outTypes] = getDiscriminatingTypes(oldOp);
-/*
+
+  // arithmetic units
   if (extModName == arith_comp::addf || extModName == arith_comp::addi || extModName == arith_comp::andi ||
   extModName == arith_comp::bitcast || extModName == arith_comp::ceildivsi || extModName == arith_comp::ceildivui ||
   extModName == arith_comp::divf || extModName == arith_comp::divsi || extModName == arith_comp::divui ||
@@ -250,51 +298,112 @@ static std::string getExtModuleName(Operation *oldOp) {
   extModName == arith_comp::shrsi || extModName == arith_comp::shrui || extModName == arith_comp::subf || 
   extModName == arith_comp::subi || extModName == arith_comp::xori
   ) {
-    extModName += getTypeName(*inTypes.begin(), oldOp->getLoc());
+    extModName += getTypeName(*inTypes.begin(), oldOp->getLoc());;
+  } else if (extModName == arith_comp::cmpf || extModName == arith_comp::cmpi || extModName == arith_comp::c_select) {
+    if (auto cmpOp = dyn_cast<mlir::arith::CmpIOp>(oldOp))
+      extModName += "_" + stringifyEnum(cmpOp.getPredicate()).str();
+    if (auto cmpOp = dyn_cast<mlir::arith::CmpFOp>(oldOp))
+      extModName += "_" + stringifyEnum(cmpOp.getPredicate()).str();
+    extModName += getTypeName(*inTypes.begin(), oldOp->getLoc());;
+  } else if (extModName == arith_comp::extf || extModName == arith_comp::extsi  || extModName == arith_comp::extui ||
+  extModName == arith_comp::fptosi || extModName == arith_comp::fptoui || extModName == arith_comp::sitofp  ||
+  extModName == arith_comp::truncf || extModName == arith_comp::trunci || extModName == arith_comp::uitofp) {
+    extModName += "_in" + getTypeName(*inTypes.begin(), oldOp->getLoc());;
+    extModName += "_out" + getTypeName(*outTypes.begin(), oldOp->getLoc());;
   }
-  */
-/*
-  // Add value of the constant operation
-  if (auto constOp = dyn_cast<handshake::ConstantOp>(oldOp)) {
-    if (auto intAttr = constOp.getValue().dyn_cast<IntegerAttr>()) {
-      auto intType = intAttr.getType();
 
-      if (intType.isSignedInteger())
-        extModName += "_c" + std::to_string(intAttr.getSInt());
-      else if (intType.isUnsignedInteger())
-        extModName += "_c" + std::to_string(intAttr.getUInt());
-      else
-        extModName += "_c" + std::to_string((uint64_t)intAttr.getInt());
-    } else if (auto floatAttr = constOp.getValue().dyn_cast<FloatAttr>())
-      extModName +=
-          "_c" + std::to_string(floatAttr.getValue().convertToFloat());
+  // dataflow units
+  if (extModName == handshake_comp::buffer) {
+    // datawidth:
+    extModName += getTypeName(*outTypes.begin(), oldOp->getLoc());;
+    // buffer type:
+    auto bufferOp = dyn_cast<handshake::BufferOp>(oldOp);
+    if (bufferOp.isSequential())
+      extModName += "_seq";
     else
-      oldOp->emitError("unsupported constant type");
-  }
-  */
-/*
+      extModName += "_fifo";
+    //number of slots
+    extModName += "_" + std::to_string(bufferOp.getNumSlots());
+  } else if (extModName == handshake_comp::fork || extModName == handshake_comp::lazy_fork) {
+    // number of outputs:
+    extModName += "_" + std::to_string(outTypes.size());
+    // datawidth:
+    extModName += getTypeName(*outTypes.begin(), oldOp->getLoc());;
+  } else if (extModName == handshake_comp::merge) {
+    // number of inputs
+    extModName += "_" + std::to_string(inTypes.size());
+    // datawidth:
+    extModName += getTypeName(*inTypes.begin(), oldOp->getLoc());;
+  } else if (extModName == handshake_comp::mux || extModName == handshake_comp::control_merge) {
+    if (extModName == handshake_comp::mux) {
+      // number of inputs (without select param):
+      extModName += "_" + std::to_string(inTypes.size() - 1);
+      // datawidth:
+      extModName += getTypeName(*(inTypes.begin() + 1), oldOp->getLoc());
+      // select datawidth:
+      extModName += getTypeName(*(inTypes.begin()), oldOp->getLoc());
+    } else {
+      // number of inputs
+      extModName += "_" + std::to_string(inTypes.size());
+      // datawidth:
+      extModName += getTypeName(*inTypes.begin(), oldOp->getLoc());;
+      // index result datawidth:
+      extModName += getTypeName(*(outTypes.end() - 1), oldOp->getLoc());;
+    }
+  } else if (extModName == handshake_comp::br || extModName == handshake_comp::cond_br || extModName == handshake_comp::sink ||
+  extModName == handshake_comp::source) {
+    // datawidth:
+    if (extModName == handshake_comp::cond_br) { 
+      extModName += getTypeName(*(inTypes.begin() + 1), oldOp->getLoc());
+    } else if (!inTypes.empty())
+      extModName += getTypeName(*inTypes.begin(), oldOp->getLoc());
+    else
+      extModName += getTypeName(*outTypes.begin(), oldOp->getLoc());;
+  } else if (extModName == handshake_comp::d_load || extModName == handshake_comp::d_store) {
+      // data datawidth:
+      extModName += getTypeName(*inTypes.begin(), oldOp->getLoc());
+      // adress datawidth:
+      extModName += getTypeName(*(inTypes.begin() + 1), oldOp->getLoc());
+  } else if (extModName == handshake_comp::constant) {
+    // constant value:
+    if (auto constOp = dyn_cast<handshake::ConstantOp>(oldOp)) {
+      if (auto intAttr = constOp.getValue().dyn_cast<IntegerAttr>()) {
+        auto intType = intAttr.getType();
 
-  // Add discriminating input and output types
-  auto [inTypes, outTypes] = getDiscriminatingTypes(oldOp);
-  if (!inTypes.empty())
+        if (intType.isSignedInteger())
+          extModName += "_c" + std::to_string(intAttr.getSInt());
+        else if (intType.isUnsignedInteger())
+          extModName += "_c" + std::to_string(intAttr.getUInt());
+        else
+          extModName += "_c" + std::to_string((uint64_t)intAttr.getInt());
+      } else if (auto floatAttr = constOp.getValue().dyn_cast<FloatAttr>())
+        extModName +=
+            "_c" + std::to_string(floatAttr.getValue().convertToFloat());
+      else
+        oldOp->emitError("unsupported constant type");
+    }
+    // datawidth:
+    extModName += getTypeName(*inTypes.begin(), oldOp->getLoc());;
+  } else if (extModName == handshake_comp::join || extModName == handshake_comp::d_return || extModName == handshake_comp::end ||
+  extModName == handshake_comp::sync) {
+    // array of datawidths:
+    for (auto inType : inTypes)
+      extModName += getTypeName(inType, oldOp->getLoc());
+  } else if (extModName == handshake_comp::mem_controller) {
+    // data datawidth:
+    extModName += getTypeName(*inTypes.begin(), oldOp->getLoc());
+    // index datawidth NOT SURE:
+    extModName += getTypeName(*(inTypes.end() - 1), oldOp->getLoc());;
+    // array of arays load/store accesses: TODO
     extModName += "_in";
-
-  for (auto inType : inTypes)
-    extModName += getTypeName(inType, oldOp->getLoc());
-
-  if (!outTypes.empty())
+    extModName += "_" + std::to_string(inTypes.size());
     extModName += "_out";
-  for (auto outType : outTypes)
-    extModName += getTypeName(outType, oldOp->getLoc());
+    extModName += "_" + std::to_string(outTypes.size() - 1);
+  }
 
-  // Add comparison type for comparison operations
-  if (auto cmpOp = dyn_cast<mlir::arith::CmpIOp>(oldOp))
-    extModName += "_" + stringifyEnum(cmpOp.getPredicate()).str();
-  if (auto cmpOp = dyn_cast<mlir::arith::CmpFOp>(oldOp))
-    extModName += "_" + stringifyEnum(cmpOp.getPredicate()).str();
-*/
   return extModName;
 }
+
 
 /// Checks whether a module with the same name has been created elsewhere in the
 /// top level module. Returns the matched module operation if true, otherwise
