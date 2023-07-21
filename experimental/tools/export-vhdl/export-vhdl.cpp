@@ -61,9 +61,76 @@ static std::string getExtModuleName(Operation *oldOp) {
   }
 
   // Add discriminating input and output types
-  auto [inTypes, outTypes] = getDiscriminatingTypes(oldOp);
+  auto [inTypes, outTypes] = getDiscriminatingParameters(oldOp);
   if (!inTypes.empty())
     extModName += "_in";
+  for (auto inType : inTypes)
+    extModName += getTypeName(inType, oldOp->getLoc());
+
+  if (!outTypes.empty())
+    extModName += "_out";
+  for (auto outType : outTypes)
+    extModName += getTypeName(outType, oldOp->getLoc());
+
+  // Add comparison type for comparison operations
+  if (auto cmpOp = dyn_cast<mlir::arith::CmpIOp>(oldOp))
+    extModName += "_" + stringifyEnum(cmpOp.getPredicate()).str();
+  if (auto cmpOp = dyn_cast<mlir::arith::CmpFOp>(oldOp))
+    extModName += "_" + stringifyEnum(cmpOp.getPredicate()).str();
+
+  return extModName;
+}
+*/
+///////////////////////
+
+
+/// Constructs an external module name corresponding to an operation. The
+/// returned name is unique with respect to the operation's discriminating
+/// types.
+////static std::string getExtModuleName(Operation *oldOp) {
+  //std::string extModName = getBareExtModuleName(oldOp);
+  //auto [inTypes, outTypes] = getDiscriminatingParameters(oldOp);
+/*
+  if (extModName == arith_comp::addf || extModName == arith_comp::addi || extModName == arith_comp::andi ||
+  extModName == arith_comp::bitcast || extModName == arith_comp::ceildivsi || extModName == arith_comp::ceildivui ||
+  extModName == arith_comp::divf || extModName == arith_comp::divsi || extModName == arith_comp::divui ||
+  extModName == arith_comp::floordivsi  || extModName == arith_comp::maxf || extModName == arith_comp::maxsi ||
+  extModName == arith_comp::maxui || extModName == arith_comp::minf  || extModName == arith_comp::minsi ||
+  extModName == arith_comp::minui || extModName == arith_comp::mulf || extModName == arith_comp::muli  ||
+  extModName == arith_comp::negf || extModName == arith_comp::ori || extModName == arith_comp::remf || 
+  extModName == arith_comp::remsi || extModName == arith_comp::remui || extModName == arith_comp::shli || 
+  extModName == arith_comp::shrsi || extModName == arith_comp::shrui || extModName == arith_comp::subf || 
+  extModName == arith_comp::subi || extModName == arith_comp::xori
+  ) {
+    extModName += getTypeName(*inTypes.begin(), oldOp->getLoc());
+  }
+  */
+/*
+  // Add value of the constant operation
+  if (auto constOp = dyn_cast<handshake::ConstantOp>(oldOp)) {
+    if (auto intAttr = constOp.getValue().dyn_cast<IntegerAttr>()) {
+      auto intType = intAttr.getType();
+
+      if (intType.isSignedInteger())
+        extModName += "_c" + std::to_string(intAttr.getSInt());
+      else if (intType.isUnsignedInteger())
+        extModName += "_c" + std::to_string(intAttr.getUInt());
+      else
+        extModName += "_c" + std::to_string((uint64_t)intAttr.getInt());
+    } else if (auto floatAttr = constOp.getValue().dyn_cast<FloatAttr>())
+      extModName +=
+          "_c" + std::to_string(floatAttr.getValue().convertToFloat());
+    else
+      oldOp->emitError("unsupported constant type");
+  }
+  
+
+
+  // Add discriminating input and output types
+  auto [inTypes, outTypes] = getDiscriminatingParameters(oldOp);
+  if (!inTypes.empty())
+    extModName += "_in";
+
   for (auto inType : inTypes)
     extModName += getTypeName(inType, oldOp->getLoc());
 
@@ -285,3 +352,7 @@ int main(int argc, char **argv) {
 
   return 0;
 }
+
+
+
+

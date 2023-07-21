@@ -305,11 +305,7 @@ create_symlink circt/build/bin/circt-opt
 create_symlink build/bin/dynamatic-opt
 create_symlink build/bin/export-dot
 create_symlink build/bin/exp-frequency-profiler
-<<<<<<< HEAD
 create_symlink build/bin/exp-export-vhdl
-=======
-create_symlink build/bin/handshake-simulator
->>>>>>> main
 
 echo ""
 echo_subsection "Build successful!"

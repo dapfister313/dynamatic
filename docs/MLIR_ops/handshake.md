@@ -31,13 +31,12 @@
 ----------------------
 # 1. Mutual schemes
 ## 1. handshake.[name]
-### buffer (2.3)
+### buffer (2.3) **[OK]**
 ```
 ### handshake.buffer
 - datawidth:
 - buffer type:
 - number of slots:
-- number of outputs
 ```
 ### num_outs & dtw
 ```mlir
@@ -45,57 +44,64 @@
 - datawidth:
 ```
 2 units with this parametres:
-- fork (2.4)
-- lazy_fork (2.5)
+- fork (2.4) **[OK]**
+- lazy_fork (2.5) **[OK]**  
+### additional
+```mlir
+- number of inputs:
+- datawidth:
+- select datawidth / index result datawidth in case of c_merge
+```
+- mux (2.7) **[OK]**
+- control_merge (2.8) **[OK]**
 ### num_inps & dtw
 ```mlir
 - number of inputs:
 - datawidth:
 ```
 3 units with this parametres:
-- merge (2.6)
-- mux (2.7)
-- control_merge (2.8)
+- merge (2.6) **[OK]**
 ### dtw
 ```mlir
 - datawidth:
 ```
 6 units with this parametres:
-- br (2.9)
-- cond_br (2.10)
-- sink (2.11)
-- source (2.12)
-- d_load (3.2)
-- d_store (3.3)
-### constant (2.14)
+- br (2.9) **[OK]**
+- cond_br (2.10)**[OK]**
+- sink (2.11)**[OK]**
+- source (2.12)**[OK]**
+### add3
+```mlir
+- datawidth:
+- address datawidth
+```
+- d_load (3.2) **[OK]**
+- d_store (3.3) **[OK]**
+### constant (2.14) **[OK]**
 ```mlir
 - constant value:
 - datawidth:
 ```
-### num_inps & array_dtws
+### add2
 ```mlir
-- number of inputs:
 - array of datawidths:
 ```
-3 units with this parametres:
-- join (2.19)
-- d_return (3.4)
-- end (3.5)
-### sync (2.20)
+- join (2.19) **[OK]**
+- sync (2.20) **[OK]**
+### add4
 ```mlir
-- number of inputs:
-- number of outputs:
-- datawidth:
+- array of datawidths:
+- array of output datawidth:
 ```
+- d_return (3.4)**[OK]**
+- end (3.5)**[OK]**
+
 ### mem_controller (3.1)
 ``` mlir
 ### handshake.mem_controller
-- datawidth:
-- number of inputs:
-- array of input types (bb/load/store):
-- number of store/load requests:
-- array of request types (load/store):
-- number of outputs:
+- data datawidth:
+- address datawidth:
+- array of arays load/store accesses
 ``` 
 ## 2. arith.[name]
 ### 1. datawidth
