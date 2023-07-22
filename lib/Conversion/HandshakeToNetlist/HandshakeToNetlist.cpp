@@ -303,7 +303,9 @@ static std::string getExtModuleName(Operation *oldOp) {
         // data bitwidth:
         extModName += getTypeName(*inTypesMem.begin(), op->getLoc());
         // address bitwidth:
-        extModName += getTypeName(*outTypesMem.begin(), op->getLoc());
+        auto [ctrlWidth, addrWidth, dataWidth] = op.getBitwidths();
+        llvm::errs() << "Widths are " << ctrlWidth << ", " << addrWidth << ", and " << dataWidth << "\n";
+
         // array of loads&stores arrays:
         for (auto [idx, blockAccesses] : llvm::enumerate(op.getAccesses())) {
           extModName += "_";
