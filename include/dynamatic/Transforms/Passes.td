@@ -75,7 +75,7 @@ def HandshakePrepareForLegacy : Pass<"handshake-prepare-for-legacy", "mlir::Modu
   let constructor = "dynamatic::createHandshakePrepareForLegacy()";
 }
 
-def HandshakeOptimizeBitwidths : Pass<"handhsake-otpimize-bitwidths",
+def HandshakeOptimizeBitwidths : Pass<"handshake-optimize-bitwidths",
                                       "mlir::ModuleOp"> {
   let summary = "Optimize bitwidths of all channels.";
   let description = [{
