@@ -304,6 +304,8 @@ static std::string getExtModuleName(Operation *oldOp) {
         extModName += getTypeName(*inTypesMem.begin(), op->getLoc());
         // address bitwidth:
         auto [ctrlWidth, addrWidth, dataWidth] = op.getBitwidths();
+  
+      
         llvm::errs() << "Widths are " << ctrlWidth << ", " << addrWidth << ", and " << dataWidth << "\n";
 
         // array of loads&stores arrays:
