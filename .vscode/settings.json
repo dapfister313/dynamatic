@@ -105,6 +105,8 @@
     "system_error": "cpp",
     "hash_map": "cpp",
     "hash_set": "cpp",
-    "valarray": "cpp"
+    "valarray": "cpp",
+    "iterator": "cpp",
+    "memory_resource": "cpp"
   }
 }
