@@ -14,9 +14,82 @@
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/SourceMgr.h"
 
+#include <cstdio>
+#include <list>
+#include <string>
+#include <map>
+#include <iostream>
+
 using namespace llvm;
 using namespace mlir;
 using namespace circt;
+
+// TIPS
+// 1) It's better to use MLIR analogues instead of cpp ones, because they safe memory:
+//  StringRef <=> string (& organised but may fall in case of memory, we assume that we don't fail)
+//  DenseMap <=> map
+//  SmallVector <=> vector / list. [however std::vector smtms may be useful]
+//  But if u have no option -> use cpp data structures
+// 2) Concretization mathod: basically generics. 
+//  Generator: start thinking, may be difficult as we work with binaries
+//  Text: for future, don't care at the moment
+// 3) path to resource: separate vhds to separate files and give the string int ../../../path_format so on
+// 4) 1st step of GENERAL PLAN is already implemented: take .hpp from the link Lucas sent you, 
+//  put it into include/dynamatic/support, read how to use it and celebrate
+// 5) About inheritance: don't use it, take the components as VHDLComponents, but specify the structure later.
+// 6) For components with equal structure it's no use in specifying them all in .json. Just link lazy_fork to fork and be happy
+
+
+// GENERAL PLAN v1.0
+// 1) parse the JSON and get the map of components description -> [special 
+// 2) extract ext_names from .mlir as string / stringrefs -> [very EASY, already done it on one of the first stages]
+// 3) merge the map with data from .mlir using getMod. At this stage we obtain VHDLModules. 
+// 4) construct a real vhdl module from each VHDLModule [seems fairly hard]
+
+// ESPECIAL PLAN v1.0
+// 1) writing 3-5 components, Better to include mem_controller as the most difficult one.
+// 2) read about reading json from cpp
+// 3) Try to implement it
+// 4) Read about MLIR data structures in detail (DenseMap's almoust unexplored)
+// 5) Start writing the core of functions
+
+struct VHDLComponent
+{
+  // here we somehow describe each component: fork, merge etc
+  // [switch / sequence of if / maybe inheritance to concretise ?]
+  // because the structure of fork differs from the structure of mem_controller, for instance.
+};
+struct VHDLModule
+{
+  std::list<std::string> input_ports;
+
+};
+
+typedef std::map <std::string, VHDLComponent> VHDLComponentLibrary;
+
+// [not needed]
+VHDLComponentLibrary 
+parseJSON (std::ifstream &jsonLib) { //in case we change path to json
+  // parsing json to get a more convenient cpp representation
+}
+VHDLModule
+getMod (std::string extName, VHDLComponentLibrary jsonLib) {
+
+}
+
+
+// if needed
+struct VHDL_MODULE_Description
+{
+  std::string pathToResource;
+  std::string concretizationMethod;
+
+};
+
+///
+/// std::string modName;
+/// std::string modParameters;
+
 
 static cl::OptionCategory mainCategory("Application options");
 
