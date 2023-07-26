@@ -1,0 +1,64 @@
+{
+  "handshake.buffer": {
+    "path": "/somewhere/in/your/filesystem",
+    "parameters": [
+      {
+        "name": "bitwidth",
+        "type": "integer"
+      },
+      {
+        "name": "buffer_type",
+        "type": "string"
+      },
+      {
+        "name": "number of slots",
+        "type": "integer"
+      }
+    ]
+  },
+
+  "handshake.fork": {
+    "path": "/somewhere/in/your/filesystem",
+    "parameters": [
+      {
+        "name": "num_outputs",
+        "type": "integer"
+      },
+      {
+        "name": "bitwidth",
+        "type": "integer"
+      }
+    ]
+  },
+
+  "handshake.mem_controller": {
+    "path": "/somewhere/in/your/filesystem",
+    "parameters": [
+      {
+        "name": "data_bitwidth",
+        "type": "integer"
+      },
+      {
+        "name": "ctrl_bitwidth",
+        "type": "integer"
+      },
+      {
+        "name": "addr_bitwidth",
+        "type": "integer"
+      },
+      {
+        "name": "load_store_arrays",
+        "types_array": "string"
+      }
+    ]
+  },
+
+  "arith.addf": {
+    "path":"/somewhere/in/your/filesystem",
+    "parameters": {
+      "name": "bitwidth",
+      "type": "integer"
+    }
+  }
+
+}
