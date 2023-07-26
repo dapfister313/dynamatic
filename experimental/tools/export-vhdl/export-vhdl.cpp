@@ -5,8 +5,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-// why it doesn't work without /home/liudmila?
-#include "/home/liudmila/dynamatic/circt/llvm/llvm/include/llvm/Support/JSON.h"
+#include "circt/Dialect/Handshake/HandshakeOps.h"
+#include "circt/Support/JSON.h"
 #include "circt/Dialect/ESI/ESIOps.h"
 #include "circt/Dialect/HW/HWOps.h"
 #include "dynamatic/Transforms/HandshakeConcretizeIndexType.h"
@@ -16,11 +16,16 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/SourceMgr.h"
+
 #include <cstdio>
-#include <iostream>
+#include <fstream>
 #include <list>
 #include <map>
 #include <string>
+
+
+#define LIBRARY_PATH                                                            \
+  "../experimental/tools/export-vhdl/library.json"
 
 using namespace llvm;
 using namespace mlir;
@@ -94,9 +99,29 @@ static cl::opt<std::string> inputFileName(cl::Positional,
                                           cl::cat(mainCategory));
 
 int main(int argc, char **argv) {
+    // Load JSON model configuration
+  llvm::outs() << "Works&\n";
+  std::ifstream f;
+  f.open(LIBRARY_PATH);
 
-  json::Object g;
+  std::stringstream buffer;
+  buffer << f.rdbuf(); 
+  std::string jsonStr = buffer.str(); 
+  llvm::outs() << jsonStr << "\n";
 
+  auto jsonConfig = llvm::json::parse(StringRef(jsonStr));
+
+  if (!jsonConfig) {
+    errs() << "Configuration JSON could not be parsed" << "\n";
+    return 1;
+  }
+
+  if (!jsonConfig->getAsObject()) {
+    errs() << "Configuration JSON is not a valid JSON" << "\n";
+    return 1;
+  }
+
+/*
   //////////////////////////////////////////////[][][][][][][][][]///////////////////////////////////////////ss
   // Initialize LLVM and parse command line arguments
   InitLLVM y(argc, argv);
@@ -140,6 +165,6 @@ int main(int argc, char **argv) {
     // fork outputs) which are gonna be needed to concretize the correct VHDL
     // modules from the templates
   }
-
+*/
   return 0;
 }
