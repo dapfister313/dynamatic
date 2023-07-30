@@ -2,6 +2,15 @@
 //
 // TODO
 //
+// Note on shift operation handling (forward and backward): the logic of
+// truncing a value only to extend it again immediately may seem unnecessary,
+// but it in fact allows the rest of the rewrite patterns to understand that
+// value fits on less bits than what the original value suggests. This is
+// slightly convoluted but we are forced to do this like that since shift
+// operations enforce that all their operands are of the same type. Ideally, we
+// would have a Handshake version of shift operations that accept varrying
+// bitwidths between its operands and result.
+//
 //===----------------------------------------------------------------------===//
 
 #include "dynamatic/Transforms/HandshakeOptimizeBitwidths.h"
@@ -319,37 +328,49 @@ struct FWShift : public OpRewritePattern<Op> {
     Value shiftBy = op->getOperand(1);
     Value minToShift = getMinimalValue(toShift);
     Value minShiftBy = getMinimalValue(shiftBy);
+    bool isRightShift = isa<arith::ShRSIOp>(op) || isa<arith::ShRUIOp>(op);
 
     // Check whether we can reduce the bitwidth of the operation
     unsigned resWidth = op->getResult(0).getType().getIntOrFloatBitWidth();
     unsigned requiredWidth = resWidth;
+    unsigned cstVal = 0;
     if (Operation *defOp = minShiftBy.getDefiningOp())
-      if (auto cstOp = dyn_cast<handshake::ConstantOp>(defOp))
-        requiredWidth =
-            std::min(requiredWidth, shiftByCst(op, minToShift, cstOp));
+      if (auto cstOp = dyn_cast<handshake::ConstantOp>(defOp)) {
+        cstVal = (unsigned)cast<IntegerAttr>(cstOp.getValue()).getInt();
+        unsigned baseWidth = minToShift.getType().getIntOrFloatBitWidth();
+        if (isRightShift)
+          requiredWidth = baseWidth;
+        else
+          requiredWidth = baseWidth + cstVal;
+      }
     if (requiredWidth >= resWidth)
       return failure();
 
+    llvm::outs() << "Required width is " << requiredWidth << "\n";
     // For logical shifts, extension must also be logical
     bool logicExt = isa<arith::ShLIOp>(op) || isa<arith::ShRUIOp>(op);
-    modOp(op, minToShift, minShiftBy, requiredWidth, logicExt, rewriter);
-    return success();
-  }
+    // modOp(op, minToShift, minShiftBy, requiredWidth, logicExt, rewriter);
 
-private:
-  unsigned shiftByCst(Op op, Value minToShift,
-                      handshake::ConstantOp cstOp) const {
-    unsigned baseWidth = minToShift.getType().getIntOrFloatBitWidth();
-    unsigned shiftBy = (unsigned)cast<IntegerAttr>(cstOp.getValue()).getInt();
-    if (isa<arith::ShRSIOp>(op) || isa<arith::ShRUIOp>(op))
-      // NOTE: (lucas) Here we should normally be able to optimize the bitwidth
-      // to baseWidth - shiftBy. However, the fact that both operands and result
-      // of arith's shift operations must be of the same type prevents us from
-      // applying this optimization because we would be forced to truncate the
-      // first operand to the result bitwidth. Ideally, we should have our own
-      // Handshake version of shift operations
-      return baseWidth;
-    return baseWidth + shiftBy;
+    // Create a new operation as well as appropriate bitwidth modifications
+    // operations to keep the IR valid
+    rewriter.setInsertionPoint(op);
+    Value newLhs = modVal(minToShift, requiredWidth, logicExt, rewriter);
+    Value newRhs = modVal(minShiftBy, requiredWidth, logicExt, rewriter);
+    auto newOp = rewriter.create<Op>(op.getLoc(), newLhs, newRhs);
+    Value newRes = newOp->getResult(0);
+    if (isRightShift)
+      // In the case of a right shift, we can first truncate the result of the
+      // newly inserted shift operation to discard high-order bits that we know
+      // are 0s, then extend the result back to satisfy the users of the
+      // original operation's result
+      newRes = modVal(newRes, requiredWidth - cstVal, logicExt, rewriter);
+    Value modRes = modVal(newRes, resWidth, logicExt, rewriter);
+    inheritBB(op, newOp);
+
+    // Replace uses of the original operation's result with the result of the
+    // optimized operation we just created
+    rewriter.replaceOp(op, modRes);
+    return success();
   }
 };
 
@@ -363,6 +384,7 @@ struct BWShift : public OpRewritePattern<Op> {
     Value shiftBy = op->getOperand(1);
     Value minToShift = getMinimalValue(toShift);
     Value minShiftBy = getMinimalValue(shiftBy);
+    bool isRightShift = isa<arith::ShRSIOp>(op) || isa<arith::ShRUIOp>(op);
 
     // Check whether we can reduce the bitwidth of the operation
     unsigned resWidth = op->getResult(0).getType().getIntOrFloatBitWidth();
@@ -370,32 +392,32 @@ struct BWShift : public OpRewritePattern<Op> {
     unsigned cstVal = 0;
     if (Operation *defOp = minShiftBy.getDefiningOp())
       if (auto cstOp = dyn_cast<handshake::ConstantOp>(defOp)) {
-        requiredWidth = getActualResultWidth(op->getResult(0));
         cstVal = (unsigned)cast<IntegerAttr>(cstOp.getValue()).getInt();
+        unsigned baseWidth = getActualResultWidth(op->getResult(0));
+        if (isRightShift)
+          requiredWidth = baseWidth + cstVal;
+        else
+          requiredWidth = baseWidth;
       }
     if (requiredWidth >= resWidth)
       return failure();
 
     // Compute the number of bits actually required for the shifted integer
-    unsigned requiredToShiftWidth = requiredWidth;
-    if (isa<arith::ShLIOp>(op)) {
-      if (cstVal >= requiredWidth)
-        requiredToShiftWidth = 0;
-      else
-        requiredToShiftWidth -= cstVal;
-    } else
-      requiredToShiftWidth += cstVal;
+    if (!isRightShift) {
+    }
 
     // For logical shifts, extension must also be logical
     bool logicExt = isa<arith::ShLIOp>(op) || isa<arith::ShRUIOp>(op);
 
-    // It is possible that the backward pass on shift operations results in the
-    // the shifted integer being truncated and then extended again. While this
-    // may seem unnecessary, it allows the rest of the rewrite patterns to
-    // understand that some of the high-order bits of the shifted integer are
-    // actually discared during this optimization
-    Value modToShift =
-        modVal(minToShift, requiredToShiftWidth, logicExt, rewriter);
+    Value modToShift = minToShift;
+    if (!isRightShift) {
+      // In the case of a right shift, we first truncate the shifted integer to
+      // discard high-order bits that were discarded in the result, then extend
+      // back to satisfy the users of the original integer
+      unsigned requiredToShiftWidth =
+          requiredWidth - std::min(cstVal, requiredWidth);
+      modToShift = modVal(minToShift, requiredToShiftWidth, logicExt, rewriter);
+    }
     modOp(op, modToShift, minShiftBy, requiredWidth, logicExt, rewriter);
     return success();
   }

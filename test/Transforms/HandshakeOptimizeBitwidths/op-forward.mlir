@@ -47,17 +47,17 @@ handshake.func @subiFW(%arg0: i8, %arg1: i16, %start: none) -> i32 {
 // CHECK-SAME:                           %[[VAL_0:.*]]: i8,
 // CHECK-SAME:                           %[[VAL_1:.*]]: i16,
 // CHECK-SAME:                           %[[VAL_2:.*]]: none, ...) -> i32 attributes {argNames = ["arg0", "arg1", "start"], resNames = ["out0"]} {
-// CHECK:           %[[VAL_3:.*]] = arith.extsi %[[VAL_0]] {bb = 0 : ui32} : i8 to i17
-// CHECK:           %[[VAL_4:.*]] = arith.extsi %[[VAL_1]] {bb = 0 : ui32} : i16 to i17
-// CHECK:           %[[VAL_5:.*]] = arith.addi %[[VAL_3]], %[[VAL_4]] : i17
-// CHECK:           %[[VAL_6:.*]] = arith.extsi %[[VAL_5]] : i17 to i32
+// CHECK:           %[[VAL_3:.*]] = arith.extsi %[[VAL_0]] {bb = 0 : ui32} : i8 to i24
+// CHECK:           %[[VAL_4:.*]] = arith.extsi %[[VAL_1]] {bb = 0 : ui32} : i16 to i24
+// CHECK:           %[[VAL_5:.*]] = arith.muli %[[VAL_3]], %[[VAL_4]] : i24
+// CHECK:           %[[VAL_6:.*]] = arith.extsi %[[VAL_5]] : i24 to i32
 // CHECK:           %[[VAL_7:.*]] = d_return %[[VAL_6]] : i32
 // CHECK:           end %[[VAL_7]] : i32
 // CHECK:         }
 handshake.func @muliFW(%arg0: i8, %arg1: i16, %start: none) -> i32 {
   %ext0 = arith.extsi %arg0 : i8 to i32
   %ext1 = arith.extsi %arg1 : i16 to i32
-  %res = arith.addi %ext0, %ext1 : i32
+  %res = arith.muli %ext0, %ext1 : i32
   %returnVal = d_return %res : i32
   end %returnVal : i32
 }
@@ -159,8 +159,8 @@ handshake.func @remsiFW(%arg0: i8, %arg1: i16, %start: none) -> i32 {
 // CHECK:           end %[[VAL_6]] : i32
 // CHECK:         }
 handshake.func @andiFW(%arg0: i8, %arg1: i16, %start: none) -> i32 {
-  %ext0 = arith.extsi %arg0 : i8 to i32
-  %ext1 = arith.extsi %arg1 : i16 to i32
+  %ext0 = arith.extui %arg0 : i8 to i32
+  %ext1 = arith.extui %arg1 : i16 to i32
   %res = arith.andi %ext0, %ext1 : i32
   %returnVal = d_return %res : i32
   end %returnVal : i32
@@ -179,8 +179,8 @@ handshake.func @andiFW(%arg0: i8, %arg1: i16, %start: none) -> i32 {
 // CHECK:           end %[[VAL_6]] : i32
 // CHECK:         }
 handshake.func @oriFW(%arg0: i8, %arg1: i16, %start: none) -> i32 {
-  %ext0 = arith.extsi %arg0 : i8 to i32
-  %ext1 = arith.extsi %arg1 : i16 to i32
+  %ext0 = arith.extui %arg0 : i8 to i32
+  %ext1 = arith.extui %arg1 : i16 to i32
   %res = arith.ori %ext0, %ext1 : i32
   %returnVal = d_return %res : i32
   end %returnVal : i32
@@ -199,8 +199,8 @@ handshake.func @oriFW(%arg0: i8, %arg1: i16, %start: none) -> i32 {
 // CHECK:           end %[[VAL_6]] : i32
 // CHECK:         }
 handshake.func @xoriFW(%arg0: i8, %arg1: i16, %start: none) -> i32 {
-  %ext0 = arith.extsi %arg0 : i8 to i32
-  %ext1 = arith.extsi %arg1 : i16 to i32
+  %ext0 = arith.extui %arg0 : i8 to i32
+  %ext1 = arith.extui %arg1 : i16 to i32
   %res = arith.xori %ext0, %ext1 : i32
   %returnVal = d_return %res : i32
   end %returnVal : i32
@@ -236,9 +236,10 @@ handshake.func @shliFW(%arg0: i16, %start: none) -> i32 {
 // CHECK:           %[[VAL_2:.*]] = constant %[[VAL_1]] {value = 4 : i4} : i4
 // CHECK:           %[[VAL_3:.*]] = arith.extsi %[[VAL_2]] : i4 to i16
 // CHECK:           %[[VAL_4:.*]] = arith.shrsi %[[VAL_0]], %[[VAL_3]] : i16
-// CHECK:           %[[VAL_5:.*]] = arith.extsi %[[VAL_4]] : i16 to i32
-// CHECK:           %[[VAL_6:.*]] = d_return %[[VAL_5]] : i32
-// CHECK:           end %[[VAL_6]] : i32
+// CHECK:           %[[VAL_5:.*]] = arith.trunci %[[VAL_4]] : i16 to i12
+// CHECK:           %[[VAL_6:.*]] = arith.extsi %[[VAL_5]] : i12 to i32
+// CHECK:           %[[VAL_7:.*]] = d_return %[[VAL_6]] : i32
+// CHECK:           end %[[VAL_7]] : i32
 // CHECK:         }
 handshake.func @shrsiFW(%arg0: i16, %start: none) -> i32 {
   %cst = handshake.constant %start {value = 4 : i4} : i4
@@ -257,9 +258,10 @@ handshake.func @shrsiFW(%arg0: i16, %start: none) -> i32 {
 // CHECK:           %[[VAL_2:.*]] = constant %[[VAL_1]] {value = 4 : i4} : i4
 // CHECK:           %[[VAL_3:.*]] = arith.extui %[[VAL_2]] : i4 to i16
 // CHECK:           %[[VAL_4:.*]] = arith.shrui %[[VAL_0]], %[[VAL_3]] : i16
-// CHECK:           %[[VAL_5:.*]] = arith.extui %[[VAL_4]] : i16 to i32
-// CHECK:           %[[VAL_6:.*]] = d_return %[[VAL_5]] : i32
-// CHECK:           end %[[VAL_6]] : i32
+// CHECK:           %[[VAL_5:.*]] = arith.trunci %[[VAL_4]] : i16 to i12
+// CHECK:           %[[VAL_6:.*]] = arith.extui %[[VAL_5]] : i12 to i32
+// CHECK:           %[[VAL_7:.*]] = d_return %[[VAL_6]] : i32
+// CHECK:           end %[[VAL_7]] : i32
 // CHECK:         }
 handshake.func @shruiFW(%arg0: i16, %start: none) -> i32 {
   %cst = handshake.constant %start {value = 4 : i4} : i4
