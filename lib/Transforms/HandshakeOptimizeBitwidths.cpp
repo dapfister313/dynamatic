@@ -10,9 +10,11 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include <functional>
 
 using namespace mlir;
 using namespace circt;
+using namespace dynamatic;
 
 static bool isIntType(Type type) { return isa<IntegerType>(type); }
 
@@ -20,44 +22,37 @@ static bool isBitwidthMod(Operation *op) {
   return isa<arith::ExtSIOp, arith::ExtUIOp, arith::TruncIOp>(op);
 }
 
-static void dematerializeBitwidthMods(handshake::FuncOp funcOp,
-                                      MLIRContext *ctx) {
-  OpBuilder builder(ctx);
-  for (Operation &op : llvm::make_early_inc_range(funcOp.getOps())) {
-    if (isBitwidthMod(&op)) {
-      op.getResult(0).replaceAllUsesWith(op.getOperand(0));
-      op.erase();
-    }
-  }
+static bool isLogicOp(Operation *op) {
+  return isa<arith::AndIOp, arith::OrIOp, arith::XOrIOp>(op);
 }
 
-static void addModsForValue(Value val, Location loc, Builder &builder) {
-  // Type resType = val.getType();
-  // if (!isa<IntegerType, FloatType>(resType))
-  //   return;
+// static void dematerializeBitwidthMods(handshake::FuncOp funcOp,
+//                                       MLIRContext *ctx) {
+//   OpBuilder builder(ctx);
+//   for (Operation &op : llvm::make_early_inc_range(funcOp.getOps())) {
+//     if (isBitwidthMod(&op)) {
+//       op.getResult(0).replaceAllUsesWith(op.getOperand(0));
+//       op.erase();
+//     }
+//   }
+// }
 
-  // SmallDenseMap<unsigned, Operation *, 4> mods;
-  // for (OpOperand &use : val.getUses()) {
-  //   if (use.value)
-  // }
-}
+// static void materializeBitwidthMods(handshake::FuncOp funcOp,
+//                                     MLIRContext *ctx) {
+//   OpBuilder builder(ctx);
+//   // Materialize bitwidths modifiers for function arguments
+//   Block &entryBlock = funcOp.front();
+//   builder.setInsertionPointToStart(&entryBlock);
+//   for (auto arg : entryBlock.getArguments())
+//     addModsForValue(arg, funcOp->getLoc(), builder);
 
-static void materializeBitwidthMods(handshake::FuncOp funcOp,
-                                    MLIRContext *ctx) {
-  OpBuilder builder(ctx);
-  // Materialize bitwidths modifiers for function arguments
-  Block &entryBlock = funcOp.front();
-  builder.setInsertionPointToStart(&entryBlock);
-  for (auto arg : entryBlock.getArguments())
-    addModsForValue(arg, funcOp->getLoc(), builder);
-
-  // Materialize bitwidths modifiers for all operations in the function body
-  for (Operation &op : llvm::make_early_inc_range(funcOp.getOps())) {
-    builder.setInsertionPointToStart(&entryBlock);
-    for (Value result : op.getResults())
-      addModsForValue(result, op.getLoc(), builder);
-  }
-}
+//   // Materialize bitwidths modifiers for all operations in the function body
+//   for (Operation &op : llvm::make_early_inc_range(funcOp.getOps())) {
+//     builder.setInsertionPointToStart(&entryBlock);
+//     for (Value result : op.getResults())
+//       addModsForValue(result, op.getLoc(), builder);
+//   }
+// }
 
 // NOLINTNEXTLINE(misc-no-recursion)
 static Value getMinimalValue(Value val) {
@@ -88,42 +83,76 @@ static unsigned getActualResultWidth(Value val) {
   return maxWidth.value_or(resType.getIntOrFloatBitWidth());
 }
 
-static Operation *extendValue(Value val, unsigned extWidth,
-                              PatternRewriter &rewriter) {
-  Type type = val.getType();
-  assert(isIntType(type) && "value must be integer type");
-
-  return rewriter.create<arith::ExtSIOp>(
-      val.getLoc(), rewriter.getIntegerType(extWidth), val);
-}
-
-static Operation *truncateValue(Value val, unsigned truncWidth,
-                                PatternRewriter &rewriter) {
-  Type type = val.getType();
-  assert(isIntType(type) && "value must be integer type");
-
-  return rewriter.create<arith::TruncIOp>(
-      val.getLoc(), rewriter.getIntegerType(truncWidth), val);
-}
-
-static Value modifyBitwidth(Value val, unsigned requiredWidth,
-                            PatternRewriter &rewriter) {
+static Value modVal(Value val, unsigned requiredWidth, bool logicExt,
+                    PatternRewriter &rewriter) {
   Type type = val.getType();
   assert(isIntType(type) && "value must be integer type");
 
   unsigned width = type.getIntOrFloatBitWidth();
-  if (width < requiredWidth)
-    return rewriter
-        .create<arith::ExtSIOp>(val.getLoc(),
-                                rewriter.getIntegerType(requiredWidth), val)
-        .getResult();
-  if (width > requiredWidth)
-    return rewriter
-        .create<arith::TruncIOp>(val.getLoc(),
-                                 rewriter.getIntegerType(requiredWidth), val)
-        .getResult();
+  Operation *newOp = nullptr;
+  if (width < requiredWidth) {
+    if (logicExt)
+      newOp = rewriter.create<arith::ExtUIOp>(
+          val.getLoc(), rewriter.getIntegerType(requiredWidth), val);
+    else
+      newOp = rewriter.create<arith::ExtSIOp>(
+          val.getLoc(), rewriter.getIntegerType(requiredWidth), val);
+  } else if (width > requiredWidth)
+    newOp = rewriter.create<arith::TruncIOp>(
+        val.getLoc(), rewriter.getIntegerType(requiredWidth), val);
+  if (newOp) {
+    inheritBBFromValue(val, newOp);
+    return newOp->getResult(0);
+  }
   return val;
 }
+
+template <typename Op>
+static void modOp(Op op, Value lhs, Value rhs, unsigned width, bool logicExt,
+                  PatternRewriter &rewriter) {
+  Type resType = op->getResult(0).getType();
+  assert(isa<IntegerType>(resType) && "result must have integer type");
+  unsigned resWidth = resType.getIntOrFloatBitWidth();
+
+  // Create a new operation as well as appropriate bitwidth modifications
+  // operations to keep the IR valid
+  rewriter.setInsertionPoint(op);
+  Value newLhs = modVal(lhs, width, logicExt, rewriter);
+  Value newRhs = modVal(rhs, width, logicExt, rewriter);
+  auto newOp = rewriter.create<Op>(op.getLoc(), newLhs, newRhs);
+  Value newRes = modVal(newOp->getResult(0), resWidth, logicExt, rewriter);
+  inheritBB(op, newOp);
+
+  // Replace uses of the original operation's result with the result of the
+  // optimized operation we just created
+  rewriter.replaceOp(op, newRes);
+}
+
+//===----------------------------------------------------------------------===//
+// Transfer functions
+//===----------------------------------------------------------------------===//
+
+static inline unsigned addWidth(unsigned lhs, unsigned rhs) {
+  return std::max(lhs, rhs) + 1;
+}
+
+static inline unsigned mulWidth(unsigned lhs, unsigned rhs) {
+  return lhs + rhs;
+}
+
+static inline unsigned divWidth(unsigned lhs, unsigned _) { return lhs + 1; }
+
+static inline unsigned andWidth(unsigned lhs, unsigned rhs) {
+  return std::min(lhs, rhs);
+}
+
+static inline unsigned orWidth(unsigned lhs, unsigned rhs) {
+  return std::max(lhs, rhs);
+}
+
+//===----------------------------------------------------------------------===//
+// Rewrite patterns
+//===----------------------------------------------------------------------===//
 
 namespace {
 
@@ -163,9 +192,15 @@ struct CombineBitwidthModifiers : public OpRewritePattern<ModOp> {
   }
 };
 
+using FTransfer = std::function<unsigned(unsigned, unsigned)>;
+
 template <typename Op>
-struct ForwardAddLike : public OpRewritePattern<Op> {
+struct SingleTypeArith : public OpRewritePattern<Op> {
   using OpRewritePattern<Op>::OpRewritePattern;
+
+  SingleTypeArith(bool forward, FTransfer fTransfer, MLIRContext *ctx)
+      : OpRewritePattern<Op>(ctx), forward(forward),
+        fTransfer(std::move(fTransfer)) {}
 
   LogicalResult matchAndRewrite(Op op,
                                 PatternRewriter &rewriter) const override {
@@ -174,66 +209,197 @@ struct ForwardAddLike : public OpRewritePattern<Op> {
       return failure();
 
     // Check whether we can reduce the bitwidth of the operation
-    Value lhs = op->getOperand(0);
-    Value rhs = op->getOperand(1);
+    Value minLhs = getMinimalValue(op->getOperand(0));
+    Value minRhs = getMinimalValue(op->getOperand(1));
+    unsigned requiredWidth;
+    if (forward)
+      requiredWidth = fTransfer(minLhs.getType().getIntOrFloatBitWidth(),
+                                minRhs.getType().getIntOrFloatBitWidth());
+    else
+      requiredWidth = getActualResultWidth(op->getResult(0));
+    unsigned resWidth = resType.getIntOrFloatBitWidth();
+    if (requiredWidth >= resWidth)
+      return failure();
+
+    // For bitwise logical operations, extension must also be logical
+    bool logicExt = isLogicOp(op);
+    modOp(op, minLhs, minRhs, requiredWidth, logicExt, rewriter);
+    return success();
+  }
+
+private:
+  bool forward;
+  FTransfer fTransfer;
+};
+
+struct Select : public OpRewritePattern<arith::SelectOp> {
+  using OpRewritePattern<arith::SelectOp>::OpRewritePattern;
+
+  Select(bool forward, MLIRContext *ctx)
+      : OpRewritePattern<arith::SelectOp>(ctx), forward(forward) {}
+
+  LogicalResult matchAndRewrite(arith::SelectOp selectOp,
+                                PatternRewriter &rewriter) const override {
+    Type resType = selectOp.getResult().getType();
+    if (!isIntType(resType))
+      return failure();
+
+    // Check whether we can reduce the bitwidth of the operation
+    Value minLhs = getMinimalValue(selectOp.getTrueValue());
+    Value minRhs = getMinimalValue(selectOp.getFalseValue());
+    unsigned requiredWidth;
+    if (forward)
+      requiredWidth = std::max(minLhs.getType().getIntOrFloatBitWidth(),
+                               minRhs.getType().getIntOrFloatBitWidth());
+    else
+      requiredWidth = getActualResultWidth(selectOp.getResult());
+    unsigned resWidth = resType.getIntOrFloatBitWidth();
+    if (requiredWidth >= resWidth)
+      return failure();
+
+    // Create a new operation as well as appropriate bitwidth modifications
+    // operations to keep the IR valid
+    rewriter.setInsertionPoint(selectOp);
+    Value newLhs = modVal(minLhs, requiredWidth, false, rewriter);
+    Value newRhs = modVal(minRhs, requiredWidth, false, rewriter);
+    auto newOp = rewriter.create<arith::SelectOp>(
+        selectOp.getLoc(), selectOp.getCondition(), newLhs, newRhs);
+    Value newRes = modVal(newOp->getResult(0), resWidth, false, rewriter);
+    inheritBB(selectOp, newOp);
+
+    // Replace uses of the original operation's result with the result of the
+    // optimized operation we just created
+    rewriter.replaceOp(selectOp, newRes);
+    return success();
+  }
+
+private:
+  bool forward;
+};
+
+struct FWCmp : public OpRewritePattern<arith::CmpIOp> {
+  using OpRewritePattern<arith::CmpIOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(arith::CmpIOp cmpOp,
+                                PatternRewriter &rewriter) const override {
+    // Check whether we can reduce the bitwidth of the operation
+    Value lhs = cmpOp.getLhs();
+    Value rhs = cmpOp.getRhs();
     Value minLhs = getMinimalValue(lhs);
     Value minRhs = getMinimalValue(rhs);
-    unsigned requiredWidth =
-        std::max(minLhs.getType().getIntOrFloatBitWidth(),
-                 minRhs.getType().getIntOrFloatBitWidth()) +
-        1;
-    unsigned resWidth = resType.getIntOrFloatBitWidth();
-    if (requiredWidth >= resWidth)
+    unsigned requiredWidth = std::max(minLhs.getType().getIntOrFloatBitWidth(),
+                                      minRhs.getType().getIntOrFloatBitWidth());
+    unsigned actualWidth = lhs.getType().getIntOrFloatBitWidth();
+    if (requiredWidth >= actualWidth)
       return failure();
 
-    // Create a new arithmetic operation as well as appropriate extension
+    // Create a new operation as well as appropriate bitwidth modifications
     // operations to keep the IR valid
-    rewriter.setInsertionPoint(op);
-    Value newLhs = extendValue(minLhs, requiredWidth, rewriter)->getResult(0);
-    Value newRhs = extendValue(minRhs, requiredWidth, rewriter)->getResult(0);
-    auto newOp = rewriter.create<Op>(op.getLoc(), newLhs, newRhs);
-    Operation *extRes = extendValue(newOp->getResult(0), resWidth, rewriter);
+    rewriter.setInsertionPoint(cmpOp);
+    Value newLhs = modVal(minLhs, requiredWidth, false, rewriter);
+    Value newRhs = modVal(minRhs, requiredWidth, false, rewriter);
+    auto newOp = rewriter.create<arith::CmpIOp>(
+        cmpOp.getLoc(), cmpOp.getPredicate(), newLhs, newRhs);
+    inheritBB(cmpOp, newOp);
 
     // Replace uses of the original operation's result with the result of the
     // optimized operation we just created
-    rewriter.replaceOp(op, extRes->getResult(0));
+    rewriter.replaceOp(cmpOp, newOp.getResult());
     return success();
   }
 };
 
 template <typename Op>
-struct BackwardAddLike : public OpRewritePattern<Op> {
+struct FWShift : public OpRewritePattern<Op> {
   using OpRewritePattern<Op>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(Op op,
                                 PatternRewriter &rewriter) const override {
-    Type resType = op->getResult(0).getType();
-    if (!isIntType(resType))
-      return failure();
+    Value toShift = op->getOperand(0);
+    Value shiftBy = op->getOperand(1);
+    Value minToShift = getMinimalValue(toShift);
+    Value minShiftBy = getMinimalValue(shiftBy);
 
     // Check whether we can reduce the bitwidth of the operation
-    unsigned requiredWidth = getActualResultWidth(op->getResult(0));
-    unsigned resWidth = resType.getIntOrFloatBitWidth();
+    unsigned resWidth = op->getResult(0).getType().getIntOrFloatBitWidth();
+    unsigned requiredWidth = resWidth;
+    if (Operation *defOp = minShiftBy.getDefiningOp())
+      if (auto cstOp = dyn_cast<handshake::ConstantOp>(defOp))
+        requiredWidth =
+            std::min(requiredWidth, shiftByCst(op, minToShift, cstOp));
     if (requiredWidth >= resWidth)
       return failure();
 
-    // Create a new arithmetic operation as well as appropriate extension
-    // operations to keep the IR valid
-    rewriter.setInsertionPoint(op);
-    Value newLhs = modifyBitwidth(getMinimalValue(op->getOperand(0)),
-                                  requiredWidth, rewriter);
-    Value newRhs = modifyBitwidth(getMinimalValue(op->getOperand(1)),
-                                  requiredWidth, rewriter);
-    auto newOp = rewriter.create<Op>(op.getLoc(), newLhs, newRhs);
-    Operation *extRes = extendValue(newOp->getResult(0), resWidth, rewriter);
-
-    // Replace uses of the original operation's result with the result of the
-    // optimized operation we just created
-    rewriter.replaceOp(op, extRes->getResult(0));
+    // For logical shifts, extension must also be logical
+    bool logicExt = isa<arith::ShLIOp>(op) || isa<arith::ShRUIOp>(op);
+    modOp(op, minToShift, minShiftBy, requiredWidth, logicExt, rewriter);
     return success();
+  }
+
+private:
+  unsigned shiftByCst(Op op, Value minToShift,
+                      handshake::ConstantOp cstOp) const {
+    unsigned baseWidth = minToShift.getType().getIntOrFloatBitWidth();
+    unsigned shiftBy = (unsigned)cast<IntegerAttr>(cstOp.getValue()).getInt();
+    if (isa<arith::ShRSIOp>(op) || isa<arith::ShRUIOp>(op))
+      // NOTE: (lucas) Here we should normally be able to optimize the bitwidth
+      // to baseWidth - shiftBy. However, the fact that both operands and result
+      // of arith's shift operations must be of the same type prevents us from
+      // applying this optimization because we would be forced to truncate the
+      // first operand to the result bitwidth. Ideally, we should have our own
+      // Handshake version of shift operations
+      return baseWidth;
+    return baseWidth + shiftBy;
   }
 };
 
+template <typename Op>
+struct BWShift : public OpRewritePattern<Op> {
+  using OpRewritePattern<Op>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(Op op,
+                                PatternRewriter &rewriter) const override {
+    Value toShift = op->getOperand(0);
+    Value shiftBy = op->getOperand(1);
+    Value minToShift = getMinimalValue(toShift);
+    Value minShiftBy = getMinimalValue(shiftBy);
+
+    // Check whether we can reduce the bitwidth of the operation
+    unsigned resWidth = op->getResult(0).getType().getIntOrFloatBitWidth();
+    unsigned requiredWidth = resWidth;
+    unsigned cstVal = 0;
+    if (Operation *defOp = minShiftBy.getDefiningOp())
+      if (auto cstOp = dyn_cast<handshake::ConstantOp>(defOp)) {
+        requiredWidth = getActualResultWidth(op->getResult(0));
+        cstVal = (unsigned)cast<IntegerAttr>(cstOp.getValue()).getInt();
+      }
+    if (requiredWidth >= resWidth)
+      return failure();
+
+    // Compute the number of bits actually required for the shifted integer
+    unsigned requiredToShiftWidth = requiredWidth;
+    if (isa<arith::ShLIOp>(op)) {
+      if (cstVal >= requiredWidth)
+        requiredToShiftWidth = 0;
+      else
+        requiredToShiftWidth -= cstVal;
+    } else
+      requiredToShiftWidth += cstVal;
+
+    // For logical shifts, extension must also be logical
+    bool logicExt = isa<arith::ShLIOp>(op) || isa<arith::ShRUIOp>(op);
+
+    // It is possible that the backward pass on shift operations results in the
+    // the shifted integer being truncated and then extended again. While this
+    // may seem unnecessary, it allows the rest of the rewrite patterns to
+    // understand that some of the high-order bits of the shifted integer are
+    // actually discared during this optimization
+    Value modToShift =
+        modVal(minToShift, requiredToShiftWidth, logicExt, rewriter);
+    modOp(op, modToShift, minShiftBy, requiredWidth, logicExt, rewriter);
+    return success();
+  }
+};
 struct HandshakeOptimizeBitwidthsPass
     : public dynamatic::impl::HandshakeOptimizeBitwidthsBase<
           HandshakeOptimizeBitwidthsPass> {
@@ -253,7 +419,21 @@ struct HandshakeOptimizeBitwidthsPass
         // Forward pass
         fwChanged = false;
         RewritePatternSet fwPatterns{ctx};
-        fwPatterns.add<ForwardAddLike<arith::AddIOp>>(ctx);
+        fwPatterns.add<SingleTypeArith<arith::AddIOp>,
+                       SingleTypeArith<arith::SubIOp>>(true, addWidth, ctx);
+        fwPatterns.add<SingleTypeArith<arith::MulIOp>>(true, mulWidth, ctx);
+        fwPatterns.add<
+            SingleTypeArith<arith::DivUIOp>, SingleTypeArith<arith::DivSIOp>,
+            SingleTypeArith<arith::RemUIOp>, SingleTypeArith<arith::RemSIOp>>(
+            true, divWidth, ctx);
+        fwPatterns.add<SingleTypeArith<arith::AndIOp>>(true, andWidth, ctx);
+        fwPatterns
+            .add<SingleTypeArith<arith::OrIOp>, SingleTypeArith<arith::XOrIOp>>(
+                true, orWidth, ctx);
+        fwPatterns.add<FWShift<arith::ShLIOp>, FWShift<arith::ShRSIOp>,
+                       FWShift<arith::ShRUIOp>, FWCmp>(ctx);
+        fwPatterns.add<Select>(true, ctx);
+
         ops.clear();
         for (Operation &op : funcOp.getOps())
           ops.push_back(&op);
@@ -264,9 +444,16 @@ struct HandshakeOptimizeBitwidthsPass
         // Backward pass
         bwChanged = false;
         RewritePatternSet bwPatterns{ctx};
-        bwPatterns.add<BackwardAddLike<arith::AddIOp>>(ctx);
+        bwPatterns
+            .add<SingleTypeArith<arith::AddIOp>, SingleTypeArith<arith::SubIOp>,
+                 SingleTypeArith<arith::MulIOp>, SingleTypeArith<arith::AndIOp>,
+                 SingleTypeArith<arith::OrIOp>, SingleTypeArith<arith::XOrIOp>>(
+                false, addWidth, ctx);
+        bwPatterns.add<BWShift<arith::ShLIOp>, BWShift<arith::ShRSIOp>,
+                       BWShift<arith::ShRUIOp>>(ctx);
+        bwPatterns.add<Select>(false, ctx),
 
-        ops.clear();
+            ops.clear();
         for (Operation &op : funcOp.getOps())
           ops.push_back(&op);
         if (failed(applyOpPatternsAndFold(ops, std::move(bwPatterns), config,
