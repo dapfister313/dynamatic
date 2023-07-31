@@ -1,6 +1,7 @@
 {
   "handshake.buffer": {
     "path": "/somewhere/in/your/filesystem",
+    "concretization_method": "string",
     "parameters": [
       {
         "name": "bitwidth",
@@ -11,14 +12,14 @@
         "type": "string"
       },
       {
-        "name": "number of slots",
+        "name": "num_of_slots",
         "type": "integer"
       }
     ]
   },
-
   "handshake.fork": {
     "path": "/somewhere/in/your/filesystem",
+    "concretization_method": "string",
     "parameters": [
       {
         "name": "num_outputs",
@@ -30,9 +31,9 @@
       }
     ]
   },
-
   "handshake.mem_controller": {
     "path": "/somewhere/in/your/filesystem",
+    "concretization_method": "string",
     "parameters": [
       {
         "name": "data_bitwidth",
@@ -48,17 +49,18 @@
       },
       {
         "name": "load_store_arrays",
-        "types_array": "string"
+        "type": "chars_array"
       }
     ]
   },
-
   "arith.addf": {
-    "path":"/somewhere/in/your/filesystem",
-    "parameters": {
-      "name": "bitwidth",
-      "type": "integer"
-    }
+    "path": "/somewhere/in/your/filesystem",
+    "concretization_method": "string",
+    "parameters": [
+      {
+        "name": "bitwidth",
+        "type": "integer"
+      }
+    ]
   }
-
 }

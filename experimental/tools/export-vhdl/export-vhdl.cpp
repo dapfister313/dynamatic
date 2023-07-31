@@ -5,27 +5,37 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "circt/Dialect/Handshake/HandshakeOps.h"
-#include "circt/Support/JSON.h"
 #include "circt/Dialect/ESI/ESIOps.h"
 #include "circt/Dialect/HW/HWOps.h"
+#include "circt/Dialect/Handshake/HandshakeOps.h"
+#include "circt/Support/JSON.h"
 #include "dynamatic/Transforms/HandshakeConcretizeIndexType.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Parser/Parser.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseMapInfo.h"
+#include "llvm/ADT/EpochTracker.h"
+#include "llvm/Support/AlignOf.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/Compiler.h"
 #include "llvm/Support/InitLLVM.h"
+#include "llvm/Support/MathExtras.h"
+#include "llvm/Support/MemAlloc.h"
+#include "llvm/Support/ReverseIteration.h"
 #include "llvm/Support/SourceMgr.h"
+#include "llvm/Support/type_traits.h"
 
 #include <cstdio>
 #include <fstream>
 #include <list>
 #include <map>
 #include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
 
-
-#define LIBRARY_PATH                                                            \
-  "../experimental/tools/export-vhdl/library.json"
+#define LIBRARY_PATH "experimental/tools/export-vhdl/library.json"
 
 using namespace llvm;
 using namespace mlir;
@@ -63,31 +73,127 @@ using namespace circt;
 // Read about MLIR data structures in detail (DenseMap's almoust unexplored) 5)
 // Start writing the core of functions
 
-struct VHDLComponent {
-  // here we somehow describe each component: fork, merge etc
-  // [switch / sequence of if / maybe inheritance to concretise ?]
-  // because the structure of fork differs from the structure of mem_controller,
-  // for instance.
+struct VHDLParameter;
+struct VHDLComponent;
+
+struct VHDLParameter {
+  VHDLParameter(std::string temp_name = "", std::string temp_type = "")
+      : name{temp_name}, type{temp_type} {};
+  std::string getName() const { return name; }
+  std::string getType() const { return type; }
+
+private:
+  std::string name;
+  std::string type;
 };
+
+struct VHDLComponent {
+
+  VHDLComponent(std::string temp_path = {}, std::string temp_concr_method = {},
+                llvm::SmallVector<VHDLParameter> temp_parameters = {})
+      : path(temp_path), concretization_method(temp_concr_method),
+        parameters(temp_parameters) {}
+  std::string getPath() const { return path; }
+  std::string getConcretization_method() const {
+    return concretization_method;
+  };
+  llvm::SmallVector<VHDLParameter> getParameters() const { return parameters; }
+
+private:
+  std::string path;
+  std::string concretization_method;
+  llvm::SmallVector<VHDLParameter> parameters;
+};
+
+typedef llvm::StringMap<VHDLComponent> VHDLComponentLibrary;
+
 struct VHDLModule {
   std::list<std::string> input_ports;
 };
 
-typedef std::map<std::string, VHDLComponent> VHDLComponentLibrary;
+VHDLModule getMod(std::string extName, VHDLComponentLibrary jsonLib){
 
-// [not needed]
-VHDLComponentLibrary
-parseJSON(std::ifstream &jsonLib) { // in case we change path to json
-  // parsing json to get a more convenient cpp representation
+};
+
+VHDLComponentLibrary parseJSON() {
+  // Load JSON library
+  std::ifstream lib;
+  lib.open(LIBRARY_PATH);
+  // VHDLComponentLibrary m{};
+  VHDLComponentLibrary m{};
+  if (!lib.is_open()) {
+    errs() << "Filepath is uncorrect\n";
+    return m;
+  }
+  // Read as file
+  std::stringstream buffer;
+  buffer << lib.rdbuf();
+  std::string jsonStr = buffer.str();
+
+  // Parse the library
+  auto jsonLib = llvm::json::parse(StringRef(jsonStr));
+
+  if (!jsonLib) {
+    errs() << "Library JSON could not be parsed"
+           << "\n";
+    return m;
+  }
+
+  if (!jsonLib->getAsObject()) {
+    errs() << "Library JSON is not a valid JSON"
+           << "\n";
+    return m;
+  }
+  for (auto item : *jsonLib->getAsObject()) {
+    auto key_name = item.first.str();
+    auto path = item.second.getAsObject()
+                    ->find("path")
+                    ->second.getAsString()
+                    .value()
+                    .str();
+    auto concretization_method = item.second.getAsObject()
+                                     ->find("concretization_method")
+                                     ->second.getAsString()
+                                     .value()
+                                     .str();
+    auto parameters =
+        item.getSecond().getAsObject()->get("parameters")->getAsArray();
+    llvm::SmallVector<VHDLParameter> components{};
+    for (auto i = parameters->begin(); i != parameters->end(); ++i) {
+      auto obj = i->getAsObject();
+      auto name = obj->get("name")->getAsString().value().str();
+      auto type = obj->get("type")->getAsString().value().str();
+      components.push_back(VHDLParameter(name, type));
+    }
+    m.insert(std::pair(key_name,
+                       VHDLComponent(path, concretization_method, components)));
+  }
+
+  return m;
 }
-VHDLModule getMod(std::string extName, VHDLComponentLibrary jsonLib) {}
+
+void testLib(VHDLComponentLibrary &m) {
+  for (auto &[keyl, val] : m) {
+    llvm::outs() << "---\n"
+                 << keyl << " "
+                 << "\npath: " << val.getPath()
+                 << "\nconcr_method: " << val.getConcretization_method()
+                 << "\nparameters:\n";
+    for (auto &i : val.getParameters()) {
+      llvm::outs() << "[" << i.getName() << "," << i.getType() << "]\n";
+    }
+  }
+}
+
+// VHDLModule getMod(std::string extName, VHDLComponentLibrary jsonLib){};
 
 // if needed
+/*
 struct VHDL_MODULE_Description {
   std::string pathToResource;
   std::string concretizationMethod;
 };
-
+*/
 ///
 /// std::string modName;
 /// std::string modParameters;
@@ -99,37 +205,19 @@ static cl::opt<std::string> inputFileName(cl::Positional,
                                           cl::cat(mainCategory));
 
 int main(int argc, char **argv) {
-    // Load JSON model configuration
-  llvm::outs() << "Works&\n";
-  std::ifstream f;
-  f.open(LIBRARY_PATH);
+  auto m = parseJSON();
+  auto i = m.find("handshake.fork");
 
-  std::stringstream buffer;
-  buffer << f.rdbuf(); 
-  std::string jsonStr = buffer.str(); 
-  llvm::outs() << jsonStr << "\n";
+  testLib(m);
 
-  auto jsonConfig = llvm::json::parse(StringRef(jsonStr));
-
-  if (!jsonConfig) {
-    errs() << "Configuration JSON could not be parsed" << "\n";
-    return 1;
-  }
-
-  if (!jsonConfig->getAsObject()) {
-    errs() << "Configuration JSON is not a valid JSON" << "\n";
-    return 1;
-  }
-
-/*
   //////////////////////////////////////////////[][][][][][][][][]///////////////////////////////////////////ss
   // Initialize LLVM and parse command line arguments
   InitLLVM y(argc, argv);
   cl::ParseCommandLineOptions(
       argc, argv,
       "VHDL exporter\n\n"
-      "This tool prints on stdout the VHDL design corresponding to the input "
-      "netlist-level MLIR representation of a dataflow circuit.\n");
+      "This tool prints on stdout the VHDL design corresponding to the input",
+      "netlist-level MLIR representation of a dataflow circuit. \n");
 
   // Read the input IR in memory
   auto fileOrErr = MemoryBuffer::getFileOrSTDIN(inputFileName.c_str());
@@ -139,7 +227,8 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  // Functions feeding into HLS tools might have attributes from high(er) level
+  // Functions feeding into HLS tools might have attributes from high(er)
+  // level
   // dialects or parsers. Allow unregistered dialects to not fail in these
   // cases
   MLIRContext context;
@@ -161,10 +250,12 @@ int main(int argc, char **argv) {
     // TODO look at the attributes/operands of each external module and
     // identify:
     // - which handshake/arith operation it maps to
-    // - the characteristic properties of the operation type (e.g., number of
-    // fork outputs) which are gonna be needed to concretize the correct VHDL
-    // modules from the templates
+    // - the characteristic properties of the operation type (e.g., number
+    // of
+    //  fork outputs) which are gonna be needed to concretize the correct
+    // VHDL
+    //  modules from the templates
   }
-*/
+
   return 0;
 }
