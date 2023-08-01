@@ -73,3 +73,12 @@ handshake.func @bufferFW(%arg0: i16, %start: none) -> i32 {
   %returnVal = d_return %buf : i32
   end %returnVal : i32
 }
+
+// -----
+
+handshake.func @cmergeToMuxFW(%arg0: i32, %arg1: i32, %start: none) -> i32 {
+  %result, %index = control_merge %arg0, %arg1 : i32, i32
+  %mux = mux %index [%arg0, %arg1] : i32, i32
+  %returnVal = d_return %mux : i32
+  end %returnVal : i32
+}
