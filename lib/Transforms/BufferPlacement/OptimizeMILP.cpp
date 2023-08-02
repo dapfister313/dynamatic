@@ -425,35 +425,39 @@ static LogicalResult createModelCtrlConstraints_fpl22(
     DenseMap<Value, ChannelVar> &channelVars,
     std::map<std::string, UnitInfo> &unitInfo) {
   // Channel constraints
-  for (auto [ch, chVars] : channelVars) {
-    // update the model to get the lower bound and upper bound of the vars
-    modelBuf.update();
+  for (auto mode : std::vector<std::string>{"valid", "ready"})
+    for (auto [ch, chVars] : channelVars) {
+      // update the model to get the lower bound and upper bound of the vars
+      modelBuf.update();
 
-    // place buffers if maxinum buffer slots is larger then 0 and the channel
-    // is selected
-    if (!chVars.select || chVars.bufNSlots.get(GRB_DoubleAttr_UB) <= 0)
-      continue;
+      // place buffers if maxinum buffer slots is larger then 0 and the channel
+      // is selected
+      if (!chVars.select || chVars.bufNSlots.get(GRB_DoubleAttr_UB) <= 0)
+        continue;
 
-    GRBVar &t1 = chVars.tDataIn;
-    GRBVar &t2 = chVars.tDataOut;
+      GRBVar &t1 = chVars.tDataIn;
+      GRBVar &t2 = chVars.tDataOut;
 
-    GRBVar &tValid1 = chVars.tValidIn;
-    GRBVar &tValid2 = chVars.tValidOut;
-    GRBVar &tReady1 = chVars.tReadyIn;
-    GRBVar &tReady2 = chVars.tReadyOut;
+      GRBVar &tValid1 = chVars.tValidIn;
+      GRBVar &tValid2 = chVars.tValidOut;
+      GRBVar &tReady1 = chVars.tReadyIn;
+      GRBVar &tReady2 = chVars.tReadyOut;
 
-    GRBVar &bufValOp = chVars.valbufIsOp;
-    GRBVar &bufRdyTr = chVars.rdybufIsTr;
+      GRBVar &bufValOp = chVars.valbufIsOp;
+      GRBVar &bufRdyTr = chVars.rdybufIsTr;
 
-    GRBVar &bufOp = chVars.bufIsOp;
-    GRBVar &bufNSlots = chVars.bufNSlots;
+      GRBVar &bufOp = chVars.bufIsOp;
+      GRBVar &bufNSlots = chVars.bufNSlots;
+      if (mode == "valid") {
+        createValidPathConstrs(modelBuf, tValid1, tValid2, bufValOp, bufRdyTr,
+                               bufOp, bufNSlots, targetCP);
+        createDataPathConstrs(modelBuf, t1, t2, bufOp, bufRdyTr, targetCP);
+      }
 
-    createDataPathConstrs(modelBuf, t1, t2, bufOp, bufRdyTr, targetCP);
-    createReadyPathConstrs(modelBuf, tReady1, tReady2, bufOp, bufRdyTr,
-                           bufNSlots, targetCP);
-    createValidPathConstrs(modelBuf, tValid1, tValid2, bufValOp, bufRdyTr,
-                           bufOp, bufNSlots, targetCP);
-  }
+      if (mode == "ready")
+        createReadyPathConstrs(modelBuf, tReady1, tReady2, bufOp, bufRdyTr,
+                               bufNSlots, targetCP);
+    }
 
   // Units constraints
   for (auto [op, _] : unitVars[mgInd]) {
@@ -466,8 +470,8 @@ static LogicalResult createModelCtrlConstraints_fpl22(
     if (latency == 0)
       for (auto inChVal : op->getOperands()) {
         // Define variables w.r.t to input port
-        // if (!channelVars[inChVal].select)
-        //   continue;
+        if (!channelVars[inChVal].select)
+          continue;
 
         GRBVar &tValidIn = channelVars[inChVal].tValidOut;
         GRBVar &tReadyIn = channelVars[inChVal].tReadyIn;
@@ -475,13 +479,14 @@ static LogicalResult createModelCtrlConstraints_fpl22(
         for (auto outChVal : op->getResults()) {
           // Define variables w.r.t to output port
 
-          // if (!channelVars[outChVal].select)
-          //   continue;
+          if (!channelVars[outChVal].select)
+            continue;
 
           GRBVar &tValidOut = channelVars[inChVal].tValidIn;
           GRBVar &tReadyOut = channelVars[inChVal].tReadyOut;
           createCtrlPathConstrs(modelBuf, tValidIn, tValidOut, delayValid);
-          createCtrlPathConstrs(modelBuf, tReadyIn, tReadyOut, delayReady);
+          //   createCtrlPathConstrs(modelBuf, tReadyIn, tReadyOut,
+          //   delayReady);
         }
       }
   }
@@ -498,17 +503,25 @@ createMixedConstrs(GRBModel &modelBuf, unsigned mgInd,
   for (auto [op, _] : (unitVars[mgInd])) {
     // if the unit is an operator
     if (isa<arith::AddIOp, arith::SubIOp, arith::MulIOp, arith::DivUIOp,
-            arith::DivSIOp, arith::ExtSIOp, arith::TruncIOp, BranchOp, MuxOp>(
-            op)) {
+            arith::CmpIOp, arith::DivSIOp, arith::ExtSIOp, arith::TruncIOp,
+            BranchOp, MuxOp, ConditionalBranchOp>(op)) {
       if (double delayVR = getMixedDelay(op, unitInfo, "VR");
           delayVR > 0 && delayVR < 100) {
         for (auto channel1 : op->getOperands()) {
           for (auto channel2 : op->getOperands()) {
-            if (channel1 == channel2)
+            if (isa<MuxOp>(op)) {
+              if (channel1 == op->getOperand(0) ||
+                  channel2 == op->getOperand(0))
+                continue;
+            } else if (channel1 == channel2)
               continue; // skip the same port
+
             if (channel1 && channel2) {
               GRBVar &tValidIn1 = channelVars[channel1].tValidOut;
               GRBVar &tReadyOut2 = channelVars[channel2].tReadyIn;
+              llvm::errs() << "op: "
+                           << unitVars[0][op].retIn.get(GRB_StringAttr_VarName)
+                           << ": VR" << delayVR << "\n";
               createCtrlPathConstrs(modelBuf, tValidIn1, tReadyOut2, delayVR);
             }
           }
@@ -517,23 +530,34 @@ createMixedConstrs(GRBModel &modelBuf, unsigned mgInd,
     }
     // if the unit is conditional branch or mux
     if (isa<ConditionalBranchOp, MuxOp>(op)) {
-      Value inPort;
+      unsigned opInd = 0;
       if (isa<ConditionalBranchOp>(op))
-        inPort = op->getOperand(1);
-      if (isa<MuxOp>(op))
-        inPort = op->getOperand(0);
-      GRBVar &tIn = channelVars[inPort].tDataOut;
+        opInd = 1;
+      GRBVar &tIn = channelVars[op->getOperand(opInd)].tDataOut;
+      for (auto outCh : op->getOperands()) {
 
-      for (auto outCh : op->getResults()) {
         GRBVar &tValidOut = channelVars[outCh].tValidIn;
-        GRBVar &tReadyOut = channelVars[outCh].tReadyOut;
-        if (double delayCV = getMixedDelay(op, unitInfo, "CV");
-            delayCV > 0 && delayCV < 100)
+        if (double delayCV = getMixedDelay(op, unitInfo, "DV");
+            delayCV > 0 && delayCV < 100) {
+          // if (isa<ConditionalBranchOp>(op))
+          //   if (outCh == op->getResult(1))
+          //     continue; // skip false reasult
+          llvm::errs() << "op: "
+                       << unitVars[0][op].retIn.get(GRB_StringAttr_VarName)
+                       << ": DV" << delayCV << "\n";
           createCtrlPathConstrs(modelBuf, tIn, tValidOut, delayCV);
-        if (double delayCR = getMixedDelay(op, unitInfo, "CR");
-            delayCR > 0 && delayCR < 100)
-          createCtrlPathConstrs(modelBuf, tIn, tValidOut, delayCR);
+        }
       }
+
+      for (unsigned ind = opInd; ind < op->getNumOperands(); ind++)
+        if (double delayCR = getMixedDelay(op, unitInfo, "DR");
+            delayCR > 0 && delayCR < 100) {
+          GRBVar &tReadyOut = channelVars[op->getOperand(ind)].tReadyIn;
+          createCtrlPathConstrs(modelBuf, tIn, tReadyOut, delayCR);
+          llvm::errs() << "op: "
+                       << unitVars[0][op].retIn.get(GRB_StringAttr_VarName)
+                       << ": DR" << delayCR << "\n";
+        }
     }
     // if the unit is a control merge
     if (isa<ControlMergeOp>(op)) {
@@ -542,9 +566,11 @@ createMixedConstrs(GRBModel &modelBuf, unsigned mgInd,
       if (channel1 && channel2) {
         GRBVar &tValidIn = channelVars[channel1].tValidOut;
         GRBVar &tOut = channelVars[channel2].tDataIn;
-        if (double delayVC = getMixedDelay(op, unitInfo, "VC");
-            delayVC > 0 && delayVC < 100)
+        if (double delayVC = getMixedDelay(op, unitInfo, "VD");
+            delayVC > 0 && delayVC < 100) {
           createCtrlPathConstrs(modelBuf, tValidIn, tOut, delayVC);
+          llvm::errs() << "op: " << op->getName() << ": VD\n";
+        }
       }
     }
   }
@@ -676,10 +702,7 @@ static void createModelThrptConstraints(
     std::vector<DenseMap<Operation *, UnitVar>> &unitVars,
     std::map<std::string, UnitInfo> &unitInfo) {
   for (auto [ind, subMG] : llvm::enumerate(chThrptToks)) {
-    llvm::errs() << "thrpt\n\n";
     for (auto &[ch, thrptTok] : subMG) {
-      llvm::errs() << channelVars[ch].hasBuf.get(GRB_StringAttr_VarName)
-                   << '\n';
 
       Operation *srcOp = ch.getDefiningOp();
       Operation *dstOp = *(ch.getUsers().begin());
@@ -822,7 +845,7 @@ LogicalResult buffer::placeBufferInCFDFCircuit(
   createModelCtrlConstraints_fpl22(modelBuf, targetCP, funcOp, cfdfcInd,
                                    unitVars, channelVars, unitInfo);
 
-  createMixedConstrs(modelBuf, cfdfcInd, unitVars, channelVars, unitInfo);
+  // createMixedConstrs(modelBuf, cfdfcInd, unitVars, channelVars, unitInfo);
 
   createModelElasticityConstraints_fpl22(modelBuf, targetCP, funcOp, unitNum,
                                          unitVars, cfdfcInd, channelVars,

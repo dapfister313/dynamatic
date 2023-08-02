@@ -189,9 +189,9 @@ int buffer::getBBIndex(Operation *op) {
 bool buffer::isBackEdge(Operation *opSrc, Operation *opDst) {
   if (opDst->isProperAncestor(opSrc))
     return true;
-  if (isa<BranchOp, ConditionalBranchOp>(opSrc) &&
-      isa<MuxOp, MergeOp, ControlMergeOp>(opDst))
-    return getBBIndex(opSrc) == getBBIndex(opDst);
+  // if (isa<BranchOp, ConditionalBranchOp>(opSrc) &&
+  //     isa<MuxOp, MergeOp, ControlMergeOp>(opDst))
+  //   return getBBIndex(opSrc) == getBBIndex(opDst);
   return false;
 }
 

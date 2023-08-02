@@ -30,7 +30,7 @@ public:
   unsigned inPortTransBuf = 0, inPortOpBuf = 0;
   unsigned outPortTransBuf = 0, outPortOpBuf = 0;
 
-  double VR = 0.0, CV = 0.0, CR = 0.0, VC = 0.0, VD = 0.0;
+  double VR = 0.0, DV = 0.0, DR = 0.0, VC = 0.0, VD = 0.0;
 };
 
 /// Get the short name of the operation, e.g., "add" for "handshake.add".

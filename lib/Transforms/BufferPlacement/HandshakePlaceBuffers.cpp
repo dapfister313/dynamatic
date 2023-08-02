@@ -203,7 +203,7 @@ LogicalResult HandshakePlaceBuffersPass::insertBuffers(FuncOp &funcOp,
 
   // for (auto [ind, _] : llvm::enumerate(cfdfcList))
   if (failed(placeBufferInCFDFCircuit(insertBufResult, funcOp, allChannels,
-                                      cfdfcList, 1, targetCP, unitInfo,
+                                      cfdfcList, 0, targetCP, unitInfo,
                                       channelBufProps)))
     return failure();
 

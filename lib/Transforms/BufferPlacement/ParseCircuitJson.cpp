@@ -68,10 +68,10 @@ double buffer::getMixedDelay(Operation *op,
 
   if (type == "VR")
     return unitInfo[opName].VR;
-  else if (type == "CV")
-    return unitInfo[opName].CV;
-  else if (type == "CR")
-    return unitInfo[opName].CR;
+  else if (type == "DV")
+    return unitInfo[opName].DV;
+  else if (type == "DR")
+    return unitInfo[opName].DR;
   else if (type == "VC")
     return unitInfo[opName].VC;
   else if (type == "VD")
@@ -281,11 +281,11 @@ LogicalResult buffer::parseJson(const std::string &jsonFile,
     unitInfo[op].outPortReadyDelay =
         unitInfoJson["outport"]["delay"]["ready"]["1"];
 
-    unitInfo[op].VR = unitInfoJson["inport"]["delay"]["VR"];
-    unitInfo[op].CV = unitInfoJson["inport"]["delay"]["CV"];
-    unitInfo[op].CR = unitInfoJson["inport"]["delay"]["CR"];
-    unitInfo[op].VD = unitInfoJson["inport"]["delay"]["VD"];
-    unitInfo[op].VC = unitInfoJson["inport"]["delay"]["VC"];
+    unitInfo[op].VR = unitInfoJson["delay"]["VR"];
+    unitInfo[op].DV = unitInfoJson["delay"]["CV"];
+    unitInfo[op].DR = unitInfoJson["delay"]["CR"];
+    unitInfo[op].VD = unitInfoJson["delay"]["VD"];
+    unitInfo[op].VC = unitInfoJson["delay"]["VC"];
 
     unitInfo[op].inPortTransBuf = unitInfoJson["inport"]["transparentBuffer"];
     unitInfo[op].inPortOpBuf = unitInfoJson["inport"]["opaqueBuffer"];
