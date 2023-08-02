@@ -162,7 +162,6 @@ LogicalResult HandshakePlaceBuffersPass::insertBuffers(FuncOp &funcOp,
   }
   while (freq > 0) {
     // write the execution frequency to the CFDFC
-    llvm::errs() << "create CFDFC\n";
     auto circuit = createCFDFCircuit(funcOp, archs, bbs);
     circuit.execN = freq;
     cfdfcList.push_back(circuit);
@@ -204,7 +203,7 @@ LogicalResult HandshakePlaceBuffersPass::insertBuffers(FuncOp &funcOp,
 
   // for (auto [ind, _] : llvm::enumerate(cfdfcList))
   if (failed(placeBufferInCFDFCircuit(insertBufResult, funcOp, allChannels,
-                                      cfdfcList, 0, targetCP, unitInfo,
+                                      cfdfcList, 1, targetCP, unitInfo,
                                       channelBufProps)))
     return failure();
 

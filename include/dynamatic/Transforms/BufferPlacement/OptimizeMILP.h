@@ -47,6 +47,8 @@ public:
   bool select;
   GRBVar tDataIn, tDataOut, tElasIn, tElasOut;
   GRBVar bufIsOp, bufNSlots, hasBuf;
+  GRBVar tValidIn, tValidOut, tReadyIn, tReadyOut;
+  GRBVar valbufIsOp, rdybufIsTr;
 };
 
 /// Data structure to store the results of buffer placement, including the

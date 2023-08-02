@@ -51,7 +51,7 @@ inChannelMap(const std::map<Value *, ChannelVar> &channelVars, Value ch) {
 /// Initialize the variables in the MILP model
 static void
 initVarsInMILP(handshake::FuncOp funcOp, GRBModel &modelBuf,
-               std::vector<CFDFC> cfdfcList, unsigned cfdfcInd,
+               std::vector<CFDFC> &cfdfcList, unsigned cfdfcInd,
                std::vector<Value> &allChannels,
                std::vector<DenseMap<Operation *, UnitVar>> &unitVars,
                std::vector<DenseMap<Value, GRBVar>> &chThrptToks,
@@ -153,6 +153,23 @@ initVarsInMILP(handshake::FuncOp funcOp, GRBModel &modelBuf,
         modelBuf.addVar(0, GRB_INFINITY, 0.0, GRB_BINARY, chName + "_hasBuf");
     channelVar.bufIsOp =
         modelBuf.addVar(0, GRB_INFINITY, 0.0, GRB_BINARY, chName + "_bufIsOp");
+
+    channelVar.tValidIn = modelBuf.addVar(-GRB_INFINITY, GRB_INFINITY, 0.0,
+                                          GRB_CONTINUOUS, "tValidIn_" + chName);
+
+    channelVar.tValidOut =
+        modelBuf.addVar(-GRB_INFINITY, GRB_INFINITY, 0.0, GRB_CONTINUOUS,
+                        "tValidOut_" + chName);
+    channelVar.tReadyIn = modelBuf.addVar(-GRB_INFINITY, GRB_INFINITY, 0.0,
+                                          GRB_CONTINUOUS, "tReadyIn_" + chName);
+    channelVar.tReadyOut =
+        modelBuf.addVar(-GRB_INFINITY, GRB_INFINITY, 0.0, GRB_CONTINUOUS,
+                        "tReadyOut_" + chName);
+
+    channelVar.valbufIsOp = modelBuf.addVar(0, GRB_INFINITY, 0.0, GRB_BINARY,
+                                            chName + "_bufIsOpval");
+    channelVar.rdybufIsTr = modelBuf.addVar(0, GRB_INFINITY, 0.0, GRB_BINARY,
+                                            chName + "_bufIsTrrdy");
     channelVars[val] = channelVar;
     modelBuf.update();
   }
@@ -168,20 +185,56 @@ static void createPathConstrs(GRBModel &modelBuf, GRBVar &t1, GRBVar &t2,
   modelBuf.addConstr(t2 >= t1 - 2 * period * bufOp);
 }
 
-/// Create time path constraints over units.
-/// t1 is the input time of the unit, t2 is the output time of the unit.
-static void createPathConstrs(GRBModel &modelBuf, GRBVar &tIn, GRBVar &tOut,
-                              double delay, double latency, double period,
-                              double inPortDelay = 0.0,
-                              double outPortDelay = 0.0) {
-  // if the unit is combinational
-  if (latency == 0)
-    modelBuf.addConstr(tOut >= delay + tIn);
-  else {
-    // if the unit is pipelined
-    modelBuf.addConstr(tIn <= period - inPortDelay);
-    modelBuf.addConstr(tOut == outPortDelay);
-  }
+// Data path constratins for a channel
+// t1, t2 are the time stamps in the source and destination of the channel
+// bufOp: whether the inserted buffer in a channel is opaque or not;
+// bufRdyOp: whether the inserted buffer in a channel for the handshake ready
+// signal is opaque or not;
+// period: circuit period
+// constrInd: index of the constraint
+// bufDelay: delay of the inserted buffer in the channel
+// ctrlBufDelay: delay of the inserted buffer for the handshake ready signal
+static void createDataPathConstrs(GRBModel &modelBuf, GRBVar &t1, GRBVar &t2,
+                                  GRBVar &bufOp, GRBVar &bufRdyOp,
+                                  double period, double bufDelay = 0.0,
+                                  double ctrlBufDelay = 0.1) {
+  modelBuf.addConstr(t2 >= t1 - 2 * period * bufOp + ctrlBufDelay * bufRdyOp);
+  // modelBuf.addConstr(t2 >= bufDelay);
+  modelBuf.addConstr(t2 >= ctrlBufDelay * bufRdyOp);
+}
+
+static void createReadyPathConstrs(GRBModel &modelBuf, GRBVar &t1, GRBVar &t2,
+                                   GRBVar &bufOp, GRBVar &bufRdyOp,
+                                   GRBVar &bufNSlots, double period,
+                                   double bufDelay = 0.0,
+                                   double ctrlBufDelay = 0.1) {
+  modelBuf.addConstr(t1 <= period);
+  modelBuf.addConstr(t2 <= period);
+  modelBuf.addConstr(t2 >= t1 - 2 * period * bufRdyOp + ctrlBufDelay * bufOp);
+  // modelBuf.addConstr(t2 >= bufDelay);
+  modelBuf.addConstr(t2 >= ctrlBufDelay * bufOp);
+  modelBuf.addConstr(bufNSlots >= bufOp + bufRdyOp);
+}
+
+static void createValidPathConstrs(GRBModel &modelBuf, GRBVar &t1, GRBVar &t2,
+                                   GRBVar &bufValOp, GRBVar &bufRdyOp,
+                                   GRBVar &bufOp, GRBVar &bufNSlots,
+                                   double period, double bufDelay = 0.0,
+                                   double ctrlBufDelay = 0.1) {
+  modelBuf.addConstr(t1 <= period);
+  modelBuf.addConstr(t2 <= period);
+  modelBuf.addConstr(t2 >=
+                     t1 - 2 * period * bufValOp + ctrlBufDelay * bufRdyOp);
+  // modelBuf.addConstr(t2 >= bufDelay);
+  modelBuf.addConstr(t2 >= ctrlBufDelay * bufRdyOp);
+  //  buffer consistency constraints
+  modelBuf.addConstr(bufValOp == bufOp);
+}
+
+// create control path constraints through a unit
+static void createCtrlPathConstrs(GRBModel &modelBuf, GRBVar &t1, GRBVar &t2,
+                                  double delay) {
+  modelBuf.addConstr(t2 >= t1 + delay);
 }
 
 // create elasticity constraints w.r.t channels
@@ -229,9 +282,6 @@ createModelPathConstraints(GRBModel &modelBuf, double targetCP, FuncOp &funcOp,
 
     GRBVar &t1 = chVars.tDataIn;
     GRBVar &t2 = chVars.tDataOut;
-
-    // GRBVar &tElas1 = chVars.tElasIn;
-    // GRBVar &tElas2 = chVars.tElasOut;
 
     GRBVar &bufOp = chVars.bufIsOp;
     GRBVar &bufNSlots = chVars.bufNSlots;
@@ -295,6 +345,213 @@ createModelPathConstraints(GRBModel &modelBuf, double targetCP, FuncOp &funcOp,
 }
 
 /// Create constraints that describe the circuits behavior
+static LogicalResult createModelPathConstraints_fpl22(
+    GRBModel &modelBuf, double targetCP, FuncOp &funcOp, unsigned mgInd,
+    std::vector<DenseMap<Operation *, UnitVar>> &unitVars,
+    DenseMap<Value, ChannelVar> &channelVars,
+    std::map<std::string, UnitInfo> &unitInfo) {
+  // Channel constraints
+  for (auto [ch, chVars] : channelVars) {
+    // update the model to get the lower bound and upper bound of the vars
+    modelBuf.update();
+
+    // place buffers if maxinum buffer slots is larger then 0 and the channel
+    // is selected
+    if (!chVars.select || chVars.bufNSlots.get(GRB_DoubleAttr_UB) <= 0)
+      continue;
+
+    GRBVar &t1 = chVars.tDataIn;
+    GRBVar &t2 = chVars.tDataOut;
+
+    GRBVar &bufOp = chVars.bufIsOp;
+    GRBVar &bufNSlots = chVars.bufNSlots;
+    GRBVar &hasBuf = chVars.hasBuf;
+
+    createPathConstrs(modelBuf, t1, t2, bufOp, targetCP);
+  }
+
+  // Units constraints
+  for (auto [op, _] : unitVars[mgInd]) {
+    double delayData = getCombinationalDelay(op, unitInfo, "data");
+    double latency = getUnitLatency(op, unitInfo);
+
+    // iterate all input port to all output port for a unit
+    if (latency == 0)
+      for (auto inChVal : op->getOperands()) {
+        // Define variables w.r.t to input port
+        double inPortDelay = getPortDelay(inChVal, unitInfo, "out");
+        if (!channelVars[inChVal].select)
+          continue;
+
+        GRBVar &tIn = channelVars[inChVal].tDataOut;
+        for (auto outChVal : op->getResults()) {
+          // Define variables w.r.t to output port
+          double outPortDelay = getPortDelay(outChVal, unitInfo, "in");
+
+          if (!channelVars[outChVal].select)
+            continue;
+
+          GRBVar &tOut = channelVars[outChVal].tDataIn;
+          modelBuf.addConstr(tOut >= delayData + tIn);
+        }
+      }
+    else {
+      for (auto inChVal : op->getOperands()) {
+        double inPortDelay = getPortDelay(inChVal, unitInfo, "out");
+        if (!channelVars[inChVal].select)
+          continue;
+
+        GRBVar &tIn = channelVars[inChVal].tDataOut;
+        modelBuf.addConstr(tIn <= targetCP - inPortDelay);
+      }
+      for (auto outChVal : op->getResults()) {
+        // Define variables w.r.t to output port
+        double outPortDelay = getPortDelay(outChVal, unitInfo, "in");
+
+        if (!channelVars[outChVal].select)
+          continue;
+
+        GRBVar &tOut = channelVars[outChVal].tDataIn;
+        modelBuf.addConstr(tOut == outPortDelay);
+      }
+    }
+  }
+  return success();
+}
+
+static LogicalResult createModelCtrlConstraints_fpl22(
+    GRBModel &modelBuf, double targetCP, FuncOp &funcOp, unsigned mgInd,
+    std::vector<DenseMap<Operation *, UnitVar>> &unitVars,
+    DenseMap<Value, ChannelVar> &channelVars,
+    std::map<std::string, UnitInfo> &unitInfo) {
+  // Channel constraints
+  for (auto [ch, chVars] : channelVars) {
+    // update the model to get the lower bound and upper bound of the vars
+    modelBuf.update();
+
+    // place buffers if maxinum buffer slots is larger then 0 and the channel
+    // is selected
+    if (!chVars.select || chVars.bufNSlots.get(GRB_DoubleAttr_UB) <= 0)
+      continue;
+
+    GRBVar &t1 = chVars.tDataIn;
+    GRBVar &t2 = chVars.tDataOut;
+
+    GRBVar &tValid1 = chVars.tValidIn;
+    GRBVar &tValid2 = chVars.tValidOut;
+    GRBVar &tReady1 = chVars.tReadyIn;
+    GRBVar &tReady2 = chVars.tReadyOut;
+
+    GRBVar &bufValOp = chVars.valbufIsOp;
+    GRBVar &bufRdyTr = chVars.rdybufIsTr;
+
+    GRBVar &bufOp = chVars.bufIsOp;
+    GRBVar &bufNSlots = chVars.bufNSlots;
+
+    createDataPathConstrs(modelBuf, t1, t2, bufOp, bufRdyTr, targetCP);
+    createReadyPathConstrs(modelBuf, tReady1, tReady2, bufOp, bufRdyTr,
+                           bufNSlots, targetCP);
+    createValidPathConstrs(modelBuf, tValid1, tValid2, bufValOp, bufRdyTr,
+                           bufOp, bufNSlots, targetCP);
+  }
+
+  // Units constraints
+  for (auto [op, _] : unitVars[mgInd]) {
+    // double delayData = getCombinationalDelay(op, unitInfo, "data");
+    double delayValid = getCombinationalDelay(op, unitInfo, "valid");
+    double delayReady = getCombinationalDelay(op, unitInfo, "ready");
+    double latency = getUnitLatency(op, unitInfo);
+
+    // iterate all input port to all output port for a unit
+    if (latency == 0)
+      for (auto inChVal : op->getOperands()) {
+        // Define variables w.r.t to input port
+        // if (!channelVars[inChVal].select)
+        //   continue;
+
+        GRBVar &tValidIn = channelVars[inChVal].tValidOut;
+        GRBVar &tReadyIn = channelVars[inChVal].tReadyIn;
+        // GRBVar &tElasIn = channelVars[inChVal].tElasOut;
+        for (auto outChVal : op->getResults()) {
+          // Define variables w.r.t to output port
+
+          // if (!channelVars[outChVal].select)
+          //   continue;
+
+          GRBVar &tValidOut = channelVars[inChVal].tValidIn;
+          GRBVar &tReadyOut = channelVars[inChVal].tReadyOut;
+          createCtrlPathConstrs(modelBuf, tValidIn, tValidOut, delayValid);
+          createCtrlPathConstrs(modelBuf, tReadyIn, tReadyOut, delayReady);
+        }
+      }
+  }
+  return success();
+}
+
+static void
+createMixedConstrs(GRBModel &modelBuf, unsigned mgInd,
+                   std::vector<DenseMap<Operation *, UnitVar>> &unitVars,
+                   DenseMap<Value, ChannelVar> &channelVars,
+                   std::map<std::string, UnitInfo> unitInfo) {
+
+  // create mixed domain constraints
+  for (auto [op, _] : (unitVars[mgInd])) {
+    // if the unit is an operator
+    if (isa<arith::AddIOp, arith::SubIOp, arith::MulIOp, arith::DivUIOp,
+            arith::DivSIOp, arith::ExtSIOp, arith::TruncIOp, BranchOp, MuxOp>(
+            op)) {
+      if (double delayVR = getMixedDelay(op, unitInfo, "VR");
+          delayVR > 0 && delayVR < 100) {
+        for (auto channel1 : op->getOperands()) {
+          for (auto channel2 : op->getOperands()) {
+            if (channel1 == channel2)
+              continue; // skip the same port
+            if (channel1 && channel2) {
+              GRBVar &tValidIn1 = channelVars[channel1].tValidOut;
+              GRBVar &tReadyOut2 = channelVars[channel2].tReadyIn;
+              createCtrlPathConstrs(modelBuf, tValidIn1, tReadyOut2, delayVR);
+            }
+          }
+        }
+      }
+    }
+    // if the unit is conditional branch or mux
+    if (isa<ConditionalBranchOp, MuxOp>(op)) {
+      Value inPort;
+      if (isa<ConditionalBranchOp>(op))
+        inPort = op->getOperand(1);
+      if (isa<MuxOp>(op))
+        inPort = op->getOperand(0);
+      GRBVar &tIn = channelVars[inPort].tDataOut;
+
+      for (auto outCh : op->getResults()) {
+        GRBVar &tValidOut = channelVars[outCh].tValidIn;
+        GRBVar &tReadyOut = channelVars[outCh].tReadyOut;
+        if (double delayCV = getMixedDelay(op, unitInfo, "CV");
+            delayCV > 0 && delayCV < 100)
+          createCtrlPathConstrs(modelBuf, tIn, tValidOut, delayCV);
+        if (double delayCR = getMixedDelay(op, unitInfo, "CR");
+            delayCR > 0 && delayCR < 100)
+          createCtrlPathConstrs(modelBuf, tIn, tValidOut, delayCR);
+      }
+    }
+    // if the unit is a control merge
+    if (isa<ControlMergeOp>(op)) {
+      auto channel1 = op->getOperand(0);
+      auto channel2 = op->getResult(1);
+      if (channel1 && channel2) {
+        GRBVar &tValidIn = channelVars[channel1].tValidOut;
+        GRBVar &tOut = channelVars[channel2].tDataIn;
+        if (double delayVC = getMixedDelay(op, unitInfo, "VC");
+            delayVC > 0 && delayVC < 100)
+          createCtrlPathConstrs(modelBuf, tValidIn, tOut, delayVC);
+      }
+    }
+  }
+  // mixed domain
+}
+
+/// Create constraints that describe the circuits behavior
 static LogicalResult
 createModelElasticityConstraints(GRBModel &modelBuf, double targetCP,
                                  FuncOp &funcOp, unsigned unitNum,
@@ -353,6 +610,65 @@ createModelElasticityConstraints(GRBModel &modelBuf, double targetCP,
   return success();
 }
 
+/// Create constraints that describe the circuits behavior
+static LogicalResult createModelElasticityConstraints_fpl22(
+    GRBModel &modelBuf, double targetCP, FuncOp &funcOp, unsigned unitNum,
+    std::vector<DenseMap<Operation *, UnitVar>> &unitVars, unsigned mgInd,
+    DenseMap<Value, ChannelVar> &channelVars,
+    std::map<std::string, UnitInfo> unitInfo) {
+  // Channel constraints
+  for (auto [ch, chVars] : channelVars) {
+    // update the model to get the lower bound and upper bound of the vars
+    modelBuf.update();
+
+    // place buffers if maxinum buffer slots is larger then 0 and the channel
+    // is selected
+    if (!chVars.select || chVars.bufNSlots.get(GRB_DoubleAttr_UB) <= 0)
+      continue;
+
+    GRBVar &tElas1 = chVars.tElasIn;
+    GRBVar &tElas2 = chVars.tElasOut;
+
+    GRBVar &bufOp = chVars.bufIsOp;
+    GRBVar &bufNSlots = chVars.bufNSlots;
+    GRBVar &hasBuf = chVars.hasBuf;
+
+    createElasticityConstrs(modelBuf, tElas1, tElas2, bufOp, bufNSlots, hasBuf,
+                            unitNum + 1, targetCP);
+  }
+
+  // Units constraints
+  for (auto [op, _] : unitVars[mgInd]) {
+    double delayData = getCombinationalDelay(op, unitInfo, "data");
+    double delayValid = getCombinationalDelay(op, unitInfo, "valid");
+    double delayReady = getCombinationalDelay(op, unitInfo, "ready");
+    double latency = getUnitLatency(op, unitInfo);
+
+    // iterate all input port to all output port for a unit
+
+    for (auto inChVal : op->getOperands()) {
+      // Define variables w.r.t to input port
+      double inPortDelay = getPortDelay(inChVal, unitInfo, "out");
+      if (!channelVars[inChVal].select)
+        continue;
+
+      GRBVar &tElasIn = channelVars[inChVal].tElasOut;
+      for (auto outChVal : op->getResults()) {
+        // Define variables w.r.t to output port
+        double outPortDelay = getPortDelay(outChVal, unitInfo, "in");
+
+        if (!channelVars[outChVal].select)
+          continue;
+
+        GRBVar &tElasOut = channelVars[outChVal].tElasIn;
+        createElasticityConstrs(modelBuf, tElasIn, tElasOut, delayData, latency,
+                                targetCP);
+      }
+    }
+  }
+  return success();
+}
+
 static void createModelThrptConstraints(
     GRBModel &modelBuf, std::vector<GRBVar> &circtThrpt,
     std::vector<DenseMap<Value, GRBVar>> &chThrptToks,
@@ -360,10 +676,11 @@ static void createModelThrptConstraints(
     std::vector<DenseMap<Operation *, UnitVar>> &unitVars,
     std::map<std::string, UnitInfo> &unitInfo) {
   for (auto [ind, subMG] : llvm::enumerate(chThrptToks)) {
-    llvm::errs() << "yuxuan: test\n\n";
+    llvm::errs() << "thrpt\n\n";
     for (auto &[ch, thrptTok] : subMG) {
       llvm::errs() << channelVars[ch].hasBuf.get(GRB_StringAttr_VarName)
-                   << "\n";
+                   << '\n';
+
       Operation *srcOp = ch.getDefiningOp();
       Operation *dstOp = *(ch.getUsers().begin());
       int tok = isBackEdge(srcOp, dstOp) ? 1 : 0;
@@ -376,6 +693,7 @@ static void createModelThrptConstraints(
                               circtThrpt[ind], bufOp, bufNSlots, tok);
     }
   }
+
   for (auto [ind, subMG] : llvm::enumerate(unitVars))
     for (auto &[op, unitVar] : subMG) {
       GRBVar &retIn = unitVar.retIn;
@@ -400,6 +718,7 @@ setCustomizedConstraints(GRBModel &modelBuf,
       modelBuf.addConstr(chVars.bufIsOp >= 0);
     } else if (channelBufProps[ch].minTrans > 0) {
       modelBuf.addConstr(chVars.bufNSlots >= channelBufProps[ch].minTrans);
+      modelBuf.addConstr(chVars.rdybufIsTr >= 0);
       modelBuf.addConstr(chVars.bufIsOp <= 0);
     }
 
@@ -495,10 +814,19 @@ LogicalResult buffer::placeBufferInCFDFCircuit(
   unsigned unitNum = 0;
   for (auto &op : funcOp.getOps())
     unitNum++;
-  createModelPathConstraints(modelBuf, targetCP, funcOp, channelVars, unitInfo);
+  // createModelPathConstraints(modelBuf, targetCP, funcOp, channelVars,
+  // unitInfo);
+  createModelPathConstraints_fpl22(modelBuf, targetCP, funcOp, cfdfcInd,
+                                   unitVars, channelVars, unitInfo);
 
-  createModelElasticityConstraints(modelBuf, targetCP, funcOp, unitNum,
-                                   channelVars, unitInfo);
+  createModelCtrlConstraints_fpl22(modelBuf, targetCP, funcOp, cfdfcInd,
+                                   unitVars, channelVars, unitInfo);
+
+  createMixedConstrs(modelBuf, cfdfcInd, unitVars, channelVars, unitInfo);
+
+  createModelElasticityConstraints_fpl22(modelBuf, targetCP, funcOp, unitNum,
+                                         unitVars, cfdfcInd, channelVars,
+                                         unitInfo);
 
   createModelThrptConstraints(modelBuf, circtThrpts, chThrptToks, channelVars,
                               unitVars, unitInfo);

@@ -57,6 +57,29 @@ getBitWidthMatchedTimeInfo(unsigned bitWidth,
   return timeInfo.end()->second;
 }
 
+double buffer::getMixedDelay(Operation *op,
+                             std::map<std::string, buffer::UnitInfo> &unitInfo,
+                             std::string type) {
+  double delay;
+  std::string opName = getOperationFullName(op);
+  // check whether delay information exists
+  if (unitInfo.find(opName) == unitInfo.end())
+    return 0.0;
+
+  if (type == "VR")
+    return unitInfo[opName].VR;
+  else if (type == "CV")
+    return unitInfo[opName].CV;
+  else if (type == "CR")
+    return unitInfo[opName].CR;
+  else if (type == "VC")
+    return unitInfo[opName].VC;
+  else if (type == "VD")
+    return unitInfo[opName].VD;
+
+  return 0.0;
+}
+
 double buffer::getPortDelay(Value channel,
                             std::map<std::string, buffer::UnitInfo> &unitInfo,
                             std::string direction) {
@@ -257,6 +280,12 @@ LogicalResult buffer::parseJson(const std::string &jsonFile,
         unitInfoJson["outport"]["delay"]["valid"]["1"];
     unitInfo[op].outPortReadyDelay =
         unitInfoJson["outport"]["delay"]["ready"]["1"];
+
+    unitInfo[op].VR = unitInfoJson["inport"]["delay"]["VR"];
+    unitInfo[op].CV = unitInfoJson["inport"]["delay"]["CV"];
+    unitInfo[op].CR = unitInfoJson["inport"]["delay"]["CR"];
+    unitInfo[op].VD = unitInfoJson["inport"]["delay"]["VD"];
+    unitInfo[op].VC = unitInfoJson["inport"]["delay"]["VC"];
 
     unitInfo[op].inPortTransBuf = unitInfoJson["inport"]["transparentBuffer"];
     unitInfo[op].inPortOpBuf = unitInfoJson["inport"]["opaqueBuffer"];

@@ -29,6 +29,8 @@ public:
 
   unsigned inPortTransBuf = 0, inPortOpBuf = 0;
   unsigned outPortTransBuf = 0, outPortOpBuf = 0;
+
+  double VR = 0.0, CV = 0.0, CR = 0.0, VC = 0.0, VD = 0.0;
 };
 
 /// Get the short name of the operation, e.g., "add" for "handshake.add".
@@ -54,6 +56,10 @@ double getCombinationalDelay(Operation *op,
 double getPortDelay(Value channel,
                     std::map<std::string, buffer::UnitInfo> &unitInfo,
                     std::string type = "in");
+
+double getMixedDelay(Operation *op,
+                     std::map<std::string, buffer::UnitInfo> &unitInfo,
+                     std::string type);
 
 /// Parse the buffer placement requirement w.r.t to each channel
 LogicalResult
