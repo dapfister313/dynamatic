@@ -26,6 +26,7 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/type_traits.h"
 
+#include <any>
 #include <cstdio>
 #include <fstream>
 #include <list>
@@ -34,6 +35,15 @@
 #include <string_view>
 #include <tuple>
 #include <utility>
+
+#include <functional>
+#include <iomanip>
+#include <iostream>
+#include <type_traits>
+#include <typeindex>
+#include <typeinfo>
+#include <unordered_map>
+#include <vector>
 
 #define LIBRARY_PATH "experimental/tools/export-vhdl/library.json"
 
@@ -106,13 +116,30 @@ private:
 };
 
 typedef llvm::StringMap<VHDLComponent> VHDLComponentLibrary;
+typedef llvm::SmallVector<std::string> string_arr;
+typedef llvm::SmallVector<int> integer_arr;
 
 struct VHDLModule {
-  std::list<std::string> input_ports;
-};
+  VHDLModule(
+      std::string temp_mtext = {}, std::string temp_path = {},
+      std::string temp_concr_method = {},
+      llvm::SmallVector<std::pair<std::string, llvm::Any>> temp_parameters = {})
+      : mod_text(temp_mtext), path(temp_path),
+        concretization_method(temp_concr_method), parameters(temp_parameters) {}
+  std::string getMod_text() const { return mod_text; };
+  std::string getPath() const { return path; };
+  std::string getConcretization_method() const {
+    return concretization_method;
+  };
+  llvm::SmallVector<std::pair<std::string, llvm::Any>> getParameters() const {
+    return parameters;
+  };
 
-VHDLModule getMod(std::string extName, VHDLComponentLibrary jsonLib){
-
+private:
+  std::string mod_text;
+  std::string path;
+  std::string concretization_method;
+  llvm::SmallVector<std::pair<std::string, llvm::Any>> parameters;
 };
 
 VHDLComponentLibrary parseJSON() {
@@ -144,6 +171,7 @@ VHDLComponentLibrary parseJSON() {
            << "\n";
     return m;
   }
+  // parse elements in json
   for (auto item : *jsonLib->getAsObject()) {
     auto key_name = item.first.str();
     auto path = item.second.getAsObject()
@@ -171,7 +199,7 @@ VHDLComponentLibrary parseJSON() {
 
   return m;
 }
-
+// Check if library is correct
 void testLib(VHDLComponentLibrary &m) {
   for (auto &[keyl, val] : m) {
     llvm::outs() << "---\n"
@@ -185,18 +213,111 @@ void testLib(VHDLComponentLibrary &m) {
   }
 }
 
-// VHDLModule getMod(std::string extName, VHDLComponentLibrary jsonLib){};
+// get .vhd module description
+VHDLModule getMod(StringRef extName, VHDLComponentLibrary jsonLib) {
+  // extract external module name
+  size_t first_ = extName.find('_', 0);
+  size_t second_ = extName.find('_', first_ + 1);
+  std::string first_part =
+      extName.substr(first_ + 1, second_ - first_ - 1).str();
+  if (first_part == "lazy" || first_part == "control" || first_part == "cond" ||
+      first_part == "d" || first_part == "mem") {
+    second_ = extName.find('_', second_ + 1);
+  }
+  std::string mod_name = extName.substr(0, second_).str();
+  mod_name[first_] = '.';
 
-// if needed
-/*
-struct VHDL_MODULE_Description {
-  std::string pathToResource;
-  std::string concretizationMethod;
+  // find external module name in VHDLComponentLibrary
+  auto comp = jsonLib.find(mod_name);
+  if (comp == jsonLib.end()) {
+    return {};
+  }
+  size_t prev = second_ + 1;
+  size_t next = extName.find('_', prev);
+  std::string param;
+  llvm::SmallVector<std::pair<std::string, llvm::Any>> v{};
+  // parsing parameters
+  for (auto &p : (*comp).getValue().getParameters()) {
+    param = extName.substr(prev, next - prev).str();
+    llvm::Any value;
+    auto parameter_type = p.getType();
+    auto nsize = extName.size();
+
+    if (parameter_type == "integer") {
+      value = stoi(param);
+      prev = next > nsize ? nsize : next + 1;
+      next = extName.find('_', prev);
+    } else if (parameter_type == "string") {
+      value = param;
+      prev = next > nsize ? nsize : next + 1;
+      next = extName.find('_', prev);
+    } else if (parameter_type == "string_arr") {
+      string_arr arr{};
+      // get an array of strings
+      while (prev < nsize) {
+        arr.push_back(param);
+        prev = next > nsize ? nsize : next + 1;
+        next = extName.find('_', prev);
+        param = extName.substr(prev, next - prev).str();
+      }
+      value = arr;
+    } else if (parameter_type == "integer_arr") {
+      integer_arr arr{};
+      // get an array of integers
+      while (prev < nsize) {
+        if (param != "in" && param != "out") {
+          arr.push_back(stoi(param));
+        }
+        prev = next > nsize ? nsize : next + 1;
+        next = extName.find('_', prev);
+        param = extName.substr(prev, next - prev).str();
+        if (param == "out") {
+          break;
+        }
+      }
+      value = arr;
+    }
+    v.push_back(std::pair(p.getName(), value));
+  }
+  VHDLModule mod("VeryLongStringOfText", (*comp).getValue().getPath(),
+                 (*comp).getValue().getConcretization_method(), v);
+  return mod;
 };
-*/
-///
-/// std::string modName;
-/// std::string modParameters;
+
+// Test how modules are printed
+void testModules(mlir::OwningOpRef<mlir::ModuleOp> &module,
+                 VHDLComponentLibrary &m) {
+  for (auto extModOp : module->getOps<hw::HWModuleExternOp>()) {
+    auto extName = extModOp.getModuleName();
+    llvm::outs() << "---\nModule name: " << extName << "\n";
+    auto i = getMod(extModOp.getModuleName(), m);
+    if (i.getPath().empty()) {
+      llvm::outs() << "Still doesn't exist in the lib\n";
+    } else {
+      llvm::outs() << "Mod_text: " << i.getMod_text() << "\n"
+                   << "Path: " << i.getPath() << "\n"
+                   << "Concretization_method: " << i.getConcretization_method()
+                   << "\n";
+      for (auto &ind : i.getParameters()) {
+        llvm::outs() << ind.first << ": ";
+        auto value = ind.second;
+        if (llvm::any_isa<int>(value)) {
+          llvm::outs() << llvm::any_cast<int>(value) << "\n";
+        } else if (llvm::any_isa<std::string>(value)) {
+          llvm::outs() << llvm::any_cast<std::string>(value) << "\n";
+        } else if (llvm::any_isa<string_arr>(value)) {
+          for (auto &u : llvm::any_cast<string_arr>(value)) {
+            llvm::outs() << u << "\n";
+          }
+        } else if (llvm::any_isa<integer_arr>(value)) {
+          for (auto &u : llvm::any_cast<integer_arr>(value)) {
+            llvm::outs() << u << "\n";
+          }
+        }
+      }
+    }
+  }
+}
 
 static cl::OptionCategory mainCategory("Application options");
 
@@ -206,18 +327,14 @@ static cl::opt<std::string> inputFileName(cl::Positional,
 
 int main(int argc, char **argv) {
   auto m = parseJSON();
-  auto i = m.find("handshake.fork");
-
-  testLib(m);
-
   //////////////////////////////////////////////[][][][][][][][][]///////////////////////////////////////////ss
   // Initialize LLVM and parse command line arguments
   InitLLVM y(argc, argv);
   cl::ParseCommandLineOptions(
       argc, argv,
       "VHDL exporter\n\n"
-      "This tool prints on stdout the VHDL design corresponding to the input",
-      "netlist-level MLIR representation of a dataflow circuit. \n");
+      "This tool prints on stdout the VHDL design corresponding to the input"
+      "netlist-level MLIR representation of a dataflow circuit.\n");
 
   // Read the input IR in memory
   auto fileOrErr = MemoryBuffer::getFileOrSTDIN(inputFileName.c_str());
@@ -227,8 +344,7 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  // Functions feeding into HLS tools might have attributes from high(er)
-  // level
+  // Functions feeding into HLS tools might have attributes from high(er) level
   // dialects or parsers. Allow unregistered dialects to not fail in these
   // cases
   MLIRContext context;
@@ -243,19 +359,8 @@ int main(int argc, char **argv) {
   if (!module)
     return 1;
 
-  // Just print the @name of all external hardware modules in the input
-  for (auto extModOp : module->getOps<hw::HWModuleExternOp>()) {
-    llvm::outs() << extModOp.getVerilogModuleName() << "\n";
-
-    // TODO look at the attributes/operands of each external module and
-    // identify:
-    // - which handshake/arith operation it maps to
-    // - the characteristic properties of the operation type (e.g., number
-    // of
-    //  fork outputs) which are gonna be needed to concretize the correct
-    // VHDL
-    //  modules from the templates
-  }
+  // Print existing modules
+  testModules(module, m);
 
   return 0;
 }

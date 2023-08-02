@@ -1,7 +1,7 @@
 {
   "handshake.buffer": {
     "path": "/somewhere/in/your/filesystem",
-    "concretization_method": "string",
+    "concretization_method": "Exactstring",
     "parameters": [
       {
         "name": "bitwidth",
@@ -19,7 +19,7 @@
   },
   "handshake.fork": {
     "path": "/somewhere/in/your/filesystem",
-    "concretization_method": "string",
+    "concretization_method": "Exactstring",
     "parameters": [
       {
         "name": "num_outputs",
@@ -33,7 +33,7 @@
   },
   "handshake.mem_controller": {
     "path": "/somewhere/in/your/filesystem",
-    "concretization_method": "string",
+    "concretization_method": "Exactstring",
     "parameters": [
       {
         "name": "data_bitwidth",
@@ -49,14 +49,56 @@
       },
       {
         "name": "load_store_arrays",
-        "type": "chars_array"
+        "type": "string_arr"
       }
     ]
   },
-  "arith.addf": {
+  "arith.addi": {
     "path": "/somewhere/in/your/filesystem",
-    "concretization_method": "string",
+    "concretization_method": "Exactstring",
     "parameters": [
+      {
+        "name": "bitwidth",
+        "type": "integer"
+      }
+    ]
+  },
+  "arith.extsi": {
+    "path": "/somewhere/in/your/filesystem",
+    "concretization_method": "Exactstring",
+    "parameters": [
+      {
+        "name": "input_bitwidth",
+        "type": "integer"
+      },
+      {
+        "name": "output_bitwidth",
+        "type": "integer"
+      }
+    ]
+  },
+  "handshake.d_return": {
+    "path": "/somewhere/in/your/filesystem",
+    "concretization_method": "Exactstring",
+    "parameters": [
+      {
+        "name": "input_bitwidth_array",
+        "type": "integer_arr"
+      },
+      {
+        "name": "output_bitwidth_array",
+        "type": "integer_arr"
+      }
+    ]
+  },
+  "handshake.merge": {
+    "path": "/somewhere/in/your/filesystem",
+    "concretization_method": "Exactstring",
+    "parameters": [
+      {
+        "name": "num_inputs",
+        "type": "integer"
+      },
       {
         "name": "bitwidth",
         "type": "integer"
