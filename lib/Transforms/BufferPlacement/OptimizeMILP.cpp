@@ -440,8 +440,8 @@ static LogicalResult createModelCtrlConstraints_fpl22(
 
       GRBVar &tValid1 = chVars.tValidIn;
       GRBVar &tValid2 = chVars.tValidOut;
-      GRBVar &tReady1 = chVars.tReadyIn;
-      GRBVar &tReady2 = chVars.tReadyOut;
+      GRBVar &tReady1 = chVars.tReadyOut;
+      GRBVar &tReady2 = chVars.tReadyIn;
 
       GRBVar &bufValOp = chVars.valbufIsOp;
       GRBVar &bufRdyTr = chVars.rdybufIsTr;
@@ -482,8 +482,8 @@ static LogicalResult createModelCtrlConstraints_fpl22(
           if (!channelVars[outChVal].select)
             continue;
 
-          GRBVar &tValidOut = channelVars[inChVal].tValidIn;
-          GRBVar &tReadyOut = channelVars[inChVal].tReadyOut;
+          GRBVar &tValidOut = channelVars[outChVal].tValidIn;
+          GRBVar &tReadyOut = channelVars[outChVal].tReadyOut;
           createCtrlPathConstrs(modelBuf, tValidIn, tValidOut, delayValid);
           //   createCtrlPathConstrs(modelBuf, tReadyIn, tReadyOut,
           //   delayReady);
