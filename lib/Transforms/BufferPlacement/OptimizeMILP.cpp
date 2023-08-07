@@ -460,36 +460,39 @@ static LogicalResult createModelCtrlConstraints_fpl22(
     }
 
   // Units constraints
-  for (auto [op, _] : unitVars[mgInd]) {
-    // double delayData = getCombinationalDelay(op, unitInfo, "data");
-    double delayValid = getCombinationalDelay(op, unitInfo, "valid");
-    double delayReady = getCombinationalDelay(op, unitInfo, "ready");
-    double latency = getUnitLatency(op, unitInfo);
+  for (auto mode : std::vector<std::string>{"valid", "ready"})
+    for (auto [op, _] : unitVars[mgInd]) {
+      // double delayData = getCombinationalDelay(op, unitInfo, "data");
+      double delayValid = getCombinationalDelay(op, unitInfo, "valid");
+      double delayReady = getCombinationalDelay(op, unitInfo, "ready");
+      double latency = getUnitLatency(op, unitInfo);
 
-    // iterate all input port to all output port for a unit
-    if (latency == 0)
-      for (auto inChVal : op->getOperands()) {
-        // Define variables w.r.t to input port
-        if (!channelVars[inChVal].select)
-          continue;
-
-        GRBVar &tValidIn = channelVars[inChVal].tValidOut;
-        GRBVar &tReadyIn = channelVars[inChVal].tReadyIn;
-        // GRBVar &tElasIn = channelVars[inChVal].tElasOut;
-        for (auto outChVal : op->getResults()) {
-          // Define variables w.r.t to output port
-
-          if (!channelVars[outChVal].select)
+      // iterate all input port to all output port for a unit
+      if (latency == 0)
+        for (auto inChVal : op->getOperands()) {
+          // Define variables w.r.t to input port
+          if (!channelVars[inChVal].select)
             continue;
 
-          GRBVar &tValidOut = channelVars[outChVal].tValidIn;
-          GRBVar &tReadyOut = channelVars[outChVal].tReadyOut;
-          createCtrlPathConstrs(modelBuf, tValidIn, tValidOut, delayValid);
-          //   createCtrlPathConstrs(modelBuf, tReadyIn, tReadyOut,
-          //   delayReady);
+          GRBVar &tValidIn = channelVars[inChVal].tValidOut;
+          GRBVar &tReadyIn = channelVars[inChVal].tReadyIn;
+          // GRBVar &tElasIn = channelVars[inChVal].tElasOut;
+          for (auto outChVal : op->getResults()) {
+            // Define variables w.r.t to output port
+
+            if (!channelVars[outChVal].select)
+              continue;
+
+            GRBVar &tValidOut = channelVars[outChVal].tValidIn;
+            GRBVar &tReadyOut = channelVars[outChVal].tReadyOut;
+            if (mode == "valid")
+              createCtrlPathConstrs(modelBuf, tValidIn, tValidOut, delayValid);
+
+            if (mode == "ready")
+              createCtrlPathConstrs(modelBuf, tReadyIn, tReadyOut, delayReady);
+          }
         }
-      }
-  }
+    }
   return success();
 }
 
@@ -754,10 +757,10 @@ setCustomizedConstraints(GRBModel &modelBuf,
       channelVars[ch].bufNSlots.set(GRB_DoubleAttr_UB,
                                     channelBufProps[ch].maxTrans.value());
   }
-  for (auto &[ch, result] : res) {
-    modelBuf.addConstr(channelVars[ch].bufNSlots >= res[ch].numSlots);
-    modelBuf.addConstr(channelVars[ch].bufIsOp >= res[ch].opaque);
-  }
+  // for (auto &[ch, result] : res) {
+  //   modelBuf.addConstr(channelVars[ch].bufNSlots >= res[ch].numSlots);
+  //   modelBuf.addConstr(channelVars[ch].bufIsOp >= res[ch].opaque);
+  // }
 
   return success();
 }
@@ -873,7 +876,10 @@ LogicalResult buffer::placeBufferInCFDFCircuit(
       result.numSlots =
           static_cast<int>(chVarMap.bufNSlots.get(GRB_DoubleAttr_X) + 0.5);
       result.opaque = chVarMap.bufIsOp.get(GRB_DoubleAttr_X) > 0;
-      res[ch] = result;
+      if (res.contains(ch))
+        res[ch] = res[ch] + result;
+      else
+        res[ch] = result;
     }
   }
   return success();
