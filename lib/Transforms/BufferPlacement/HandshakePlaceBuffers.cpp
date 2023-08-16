@@ -55,7 +55,7 @@ static LogicalResult instantiateBuffers(DenseMap<Value, Result> &res,
     if (result.numSlots == 0)
       continue;
     Operation *opSrc = channel.getDefiningOp();
-    Operation *opDst = getUserOp(channel);
+    Operation *opDst = *channel.getUsers().begin();
 
     unsigned numOpque = 0;
     unsigned numTrans = 0;
@@ -104,8 +104,8 @@ static LogicalResult instantiateBuffers(DenseMap<Value, Result> &res,
 
 /// Delete the created archs map for MG extraction to avoid memory leak
 static void deleleArchMap(std::map<ArchBB *, bool> &archs) {
-  for (auto it = archs.begin(); it != archs.end(); ++it)
-    delete it->first;
+  for (auto &[arch, _] : archs)
+    delete arch;
   // Clear the map
   archs.clear();
 }
@@ -115,16 +115,25 @@ namespace {
 struct HandshakePlaceBuffersPass
     : public HandshakePlaceBuffersBase<HandshakePlaceBuffersPass> {
 
-  HandshakePlaceBuffersPass(bool firstMG, std::string stdLevelInfo,
-                            std::string timefile, double targetCP) {
+  HandshakePlaceBuffersPass(bool firstMG, std::string &stdLevelInfo,
+                            std::string &timefile, double targetCP,
+                            int timeLimit, bool setCustom) {
     this->firstMG = firstMG;
     this->stdLevelInfo = stdLevelInfo;
     this->timefile = timefile;
     this->targetCP = targetCP;
+    this->timeLimit = timeLimit;
+    this->setCustom = setCustom;
   }
 
   void runOnOperation() override {
     ModuleOp m = getOperation();
+
+#ifdef DYNAMATIC_GUROBI_NOT_INSTALLED
+    m.emitError() << "Project was built without Gurobi installed, can't "
+                     "run smart buffer placement pass\n";
+    return signalPassFailure();
+#endif // DYNAMATIC_GUROBI_NOT_INSTALLED
 
     ChannelBufProps strategy;
     for (auto funcOp : m.getOps<handshake::FuncOp>())
@@ -156,13 +165,19 @@ LogicalResult HandshakePlaceBuffersPass::insertBuffers(FuncOp &funcOp,
     return failure();
 
   unsigned freq;
+
   if (failed(extractCFDFCircuit(archs, bbs, freq))) {
     deleleArchMap(archs);
     return failure();
   }
+
+  // Create the CFDFC index list that will be optimized
+  std::vector<unsigned> cfdfcInds;
+  unsigned cfdfcInd = 0;
   while (freq > 0) {
     // write the execution frequency to the CFDFC
     auto circuit = createCFDFCircuit(funcOp, archs, bbs);
+    cfdfcInds.push_back(cfdfcInd++);
     circuit.execN = freq;
     cfdfcList.push_back(circuit);
     if (firstMG)
@@ -178,14 +193,14 @@ LogicalResult HandshakePlaceBuffersPass::insertBuffers(FuncOp &funcOp,
 
   // Instantiate all the channels of MILP model in different CFDFC
   std::vector<Value> allChannels;
-  for (auto &op : funcOp.getOps())
+  auto startNode = *(funcOp.front().getArguments().end() - 1);
+  for (Operation *op : startNode.getUsers())
+    for (auto opr : op->getOperands())
+      allChannels.push_back(opr);
+
+  for (Operation &op : funcOp.getOps())
     for (auto resOp : op.getResults())
       allChannels.push_back(resOp);
-
-  for (auto barg : funcOp.front().getArguments())
-    for (auto op : barg.getUsers())
-      for (auto opr : op->getOperands())
-        allChannels.push_back(opr);
 
   // Create the MILP model of buffer placement, and write the results of the
   // model to insertBufResult.
@@ -193,7 +208,8 @@ LogicalResult HandshakePlaceBuffersPass::insertBuffers(FuncOp &funcOp,
   std::map<std::string, UnitInfo> unitInfo;
   DenseMap<Value, ChannelBufProps> channelBufProps;
 
-  parseJson(timefile, unitInfo);
+  if (failed(parseJson(timefile, unitInfo)))
+    return failure();
 
   // load the buffer information of the units to channel
   if (failed(setChannelBufProps(allChannels, channelBufProps, unitInfo)))
@@ -207,7 +223,14 @@ LogicalResult HandshakePlaceBuffersPass::insertBuffers(FuncOp &funcOp,
                                         channelBufProps)))
       continue;
 
-  instantiateBuffers(insertBufResult, ctx);
+  // if (failed(placeBufferInCFDFCircuit(insertBufResult, funcOp, allChannels,
+  //                                     cfdfcList, cfdfcInds, targetCP,
+  //                                     timeLimit, setCustom, unitInfo,
+  //                                     channelBufProps)))
+  //   return failure();
+
+  if (failed(instantiateBuffers(insertBufResult, ctx)))
+    return failure();
 
   return success();
 }
@@ -217,7 +240,8 @@ std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
 dynamatic::createHandshakePlaceBuffersPass(bool firstMG,
                                            std::string stdLevelInfo,
                                            std::string timefile,
-                                           double targetCP) {
-  return std::make_unique<HandshakePlaceBuffersPass>(firstMG, stdLevelInfo,
-                                                     timefile, targetCP);
+                                           double targetCP, int timeLimit,
+                                           bool setCustom) {
+  return std::make_unique<HandshakePlaceBuffersPass>(
+      firstMG, stdLevelInfo, timefile, targetCP, timeLimit, setCustom);
 }

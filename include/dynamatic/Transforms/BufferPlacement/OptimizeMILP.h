@@ -24,33 +24,6 @@ namespace buffer {
 using namespace circt;
 using namespace handshake;
 
-/// Get user of a value, which should be a single user as the value indicating a
-/// channel should be connected to only one unit.
-inline Operation *getUserOp(Value val) {
-  auto *dstOp = *val.getUsers().begin();
-  return dstOp;
-}
-
-/// Data structure to store the variables w.r.t to a unit(operation), including
-/// whether it belongs to a CFDFC, and its retime variables.
-struct UnitVar {
-public:
-  bool select;
-  GRBVar retIn, retOut;
-};
-
-/// Data structure to store the variables w.r.t to a channel(value), including
-/// whether it belongs to a CFDFC, and its time, throughput, and buffer
-/// placement decision.
-struct ChannelVar {
-public:
-  bool select;
-  GRBVar tDataIn, tDataOut, tElasIn, tElasOut;
-  GRBVar bufIsOp, bufNSlots, hasBuf;
-  GRBVar tValidIn, tValidOut, tReadyIn, tReadyOut;
-  GRBVar valbufIsOp, rdybufIsTr;
-};
-
 /// Data structure to store the results of buffer placement, including the
 /// property and the total slots of the channel
 struct Result {
@@ -73,9 +46,16 @@ LogicalResult
 placeBufferInCFDFCircuit(DenseMap<Value, Result> &res, handshake::FuncOp funcOp,
                          std::vector<Value> &allChannels,
                          std::vector<CFDFC> cfdfcList, unsigned cfdfcInd,
-                         double targetCP,
+                         double targetCP, int timeLimit,
                          std::map<std::string, UnitInfo> unitInfo,
                          DenseMap<Value, ChannelBufProps> channelBufProps);
+
+LogicalResult placeBufferInCFDFCircuit(
+    DenseMap<Value, Result> &res, handshake::FuncOp &funcOp,
+    std::vector<Value> &allChannels, std::vector<CFDFC> &cfdfcList,
+    std::vector<unsigned> &cfdfcInds, double targetCP, int timeLimit,
+    bool setCustom, std::map<std::string, UnitInfo> &unitInfo,
+    DenseMap<Value, ChannelBufProps> &channelBufProps);
 
 /// Get the port index of a unit
 unsigned getPortInd(Operation *op, Value val);
