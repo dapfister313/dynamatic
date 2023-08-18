@@ -55,7 +55,7 @@ double getCombinationalDelay(Operation *op,
 /// Get the delay of a port(in, out) connected to a channel.
 double getPortDelay(Value channel,
                     std::map<std::string, buffer::UnitInfo> &unitInfo,
-                    std::string type = "in");
+                    std::string direction = "in");
 
 double getMixedDelay(Operation *op,
                      std::map<std::string, buffer::UnitInfo> &unitInfo,

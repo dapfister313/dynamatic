@@ -93,7 +93,8 @@ initVarsInMilp(handshake::FuncOp funcOp, GRBModel &modelBuf,
                std::vector<DenseMap<Operation *, UnitVar>> &unitVars,
                std::vector<DenseMap<Value, GRBVar>> &chThrptToks,
                DenseMap<Value, ChannelVar> &channelVars,
-               std::map<std::string, UnitInfo> unitInfo, bool fpl22 = false) {
+               std::map<std::string, UnitInfo> unitInfo, bool fpl22 = false,
+               unsigned selInd = 0) {
   // create variables
   for (auto [ind, cfdfc] : llvm::enumerate(cfdfcList)) {
     unitVars.emplace_back();
@@ -196,6 +197,12 @@ initVarsInMilp(handshake::FuncOp funcOp, GRBModel &modelBuf,
                                               chName + "_valIsOpa");
       channelVar.rdybufIsTr = modelBuf.addVar(0, GRB_INFINITY, 0.0, GRB_BINARY,
                                               chName + "_rdyIsTrans");
+
+      // Define whether the channel is in the selected CFDFC
+      auto selChannels = cfdfcList[selInd].channels;
+      if (std::find(selChannels.begin(), selChannels.end(), val) !=
+          selChannels.end())
+        channelVar.select = true;
     }
     channelVars[val] = channelVar;
     modelBuf.update();
@@ -605,7 +612,7 @@ createModelElasticityConstraints(GRBModel &modelBuf, double targetCP,
 
     // place buffers if maxinum buffer slots is larger then 0 and the channel
     // is selected
-    if (chVars.bufNSlots.get(GRB_DoubleAttr_UB) <= 0)
+    if (!channelVars.contains(ch) || !coverPath(ch))
       continue;
 
     GRBVar &tElas1 = chVars.tElasIn;
@@ -876,8 +883,8 @@ LogicalResult buffer::placeBufferInCFDFCircuit(
 LogicalResult buffer::placeBufferInCFDFCircuit(
     DenseMap<Value, Result> &res, handshake::FuncOp funcOp,
     std::vector<Value> &allChannels, std::vector<CFDFC> cfdfcList,
-    unsigned cfdfcInd, double targetCP, int timeLimit,
-    std::map<std::string, UnitInfo> unitInfo,
+    unsigned cfdfcInd, std::vector<unsigned> cfdfcInds, double targetCP,
+    int timeLimit, std::map<std::string, UnitInfo> unitInfo,
     DenseMap<Value, ChannelBufProps> channelBufProps) {
 
 #ifdef DYNAMATIC_GUROBI_NOT_INSTALLED
@@ -910,6 +917,9 @@ LogicalResult buffer::placeBufferInCFDFCircuit(
   unsigned unitNum =
       std::distance(funcOp.getOps().begin(), funcOp.getOps().end());
 
+  initVarsInMilp(funcOp, modelBuf, cfdfcList, cfdfcInds, allChannels, unitVars,
+                 chThrptToks, channelVars, unitInfo, true, cfdfcInd);
+
   createModelPathConstraints_fpl22(modelBuf, targetCP, funcOp, cfdfcInd,
                                    unitVars, channelVars, unitInfo);
 
@@ -930,6 +940,7 @@ LogicalResult buffer::placeBufferInCFDFCircuit(
   createModelObjective(modelBuf, circtThrpts, cfdfcList, channelVars);
 
   modelBuf.getEnv().set(GRB_DoubleParam_TimeLimit, timeLimit);
+  modelBuf.write("/home/yuxuan/Downloads/model.lp");
   modelBuf.optimize();
 
   //  The result is optimal if the model is solved to optimality or the time

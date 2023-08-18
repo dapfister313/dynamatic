@@ -6,17 +6,9 @@
 
 #include "dynamatic/Transforms/BufferPlacement/ParseCircuitJson.h"
 #include "dynamatic/Transforms/UtilsBitsUpdate.h"
-<<<<<<< HEAD
-#include <fstream>
-#include <iostream>
-#include <nlohmann/json.hpp>
-
-using json = nlohmann::json;
-=======
 #include "llvm/Support/JSON.h"
 #include <fstream>
 #include <iostream>
->>>>>>> a152111d2491cfda88e44e7dad2a61ecc46f296b
 
 using namespace dynamatic;
 using namespace dynamatic::buffer;
@@ -49,10 +41,6 @@ static unsigned getPortWidth(Value channel) {
 static double
 getBitWidthMatchedTimeInfo(unsigned bitWidth,
                            std::vector<std::pair<unsigned, double>> &timeInfo) {
-<<<<<<< HEAD
-  double delay;
-=======
->>>>>>> a152111d2491cfda88e44e7dad2a61ecc46f296b
   // Sort the vector based on pair.first (unsigned)
   std::sort(
       timeInfo.begin(), timeInfo.end(),
@@ -63,8 +51,7 @@ getBitWidthMatchedTimeInfo(unsigned bitWidth,
       return opDelay;
 
   // return the delay of the largest bitwidth
-<<<<<<< HEAD
-  return timeInfo.end()->second;
+  return (timeInfo.end() - 1)->second;
 }
 
 double buffer::getMixedDelay(Operation *op,
@@ -88,18 +75,11 @@ double buffer::getMixedDelay(Operation *op,
     return unitInfo[opName].VD;
 
   return 0.0;
-=======
-  return (timeInfo.end() - 1)->second;
->>>>>>> a152111d2491cfda88e44e7dad2a61ecc46f296b
 }
 
 double buffer::getPortDelay(Value channel,
                             std::map<std::string, buffer::UnitInfo> &unitInfo,
-<<<<<<< HEAD
                             std::string direction) {
-=======
-                            std::string &direction) {
->>>>>>> a152111d2491cfda88e44e7dad2a61ecc46f296b
   std::string opName;
   if (direction == "in") {
     opName = getOperationFullName(channel.getDefiningOp());
@@ -121,11 +101,7 @@ double buffer::getPortDelay(Value channel,
 
 double buffer::getUnitDelay(Operation *op,
                             std::map<std::string, buffer::UnitInfo> &unitInfo,
-<<<<<<< HEAD
                             std::string type) {
-=======
-                            std::string &type) {
->>>>>>> a152111d2491cfda88e44e7dad2a61ecc46f296b
   double delay;
   std::string opName = getOperationFullName(op);
   // check whether delay information exists
@@ -141,12 +117,9 @@ double buffer::getUnitDelay(Operation *op,
     delay = unitInfo[opName].validDelay;
   else if (type == "ready")
     delay = unitInfo[opName].readyDelay;
-<<<<<<< HEAD
-=======
   else
     delay = 0.0;
 
->>>>>>> a152111d2491cfda88e44e7dad2a61ecc46f296b
   return delay;
 }
 
@@ -158,12 +131,6 @@ buffer::getCombinationalDelay(Operation *op,
   if (unitInfo.find(getOperationFullName(op)) == unitInfo.end())
     return 0.0;
 
-<<<<<<< HEAD
-  double inPortDelay, outPortDelay;
-  double unitDelay = getUnitDelay(op, unitInfo, type);
-
-  unsigned unitBitWidth = getPortWidth(op->getOperand(0));
-=======
   double inPortDelay = 0.0;
   double outPortDelay = 0.0;
   double unitDelay = getUnitDelay(op, unitInfo, type);
@@ -171,7 +138,6 @@ buffer::getCombinationalDelay(Operation *op,
   unsigned unitBitWidth = 1;
   for (auto operand : op->getOperands())
     unitBitWidth = std::max(unitBitWidth, getPortWidth(operand));
->>>>>>> a152111d2491cfda88e44e7dad2a61ecc46f296b
 
   if (type == "data") {
     inPortDelay = getBitWidthMatchedTimeInfo(unitBitWidth,
@@ -185,10 +151,6 @@ buffer::getCombinationalDelay(Operation *op,
     inPortDelay = unitInfo[opName].inPortReadyDelay;
     outPortDelay = unitInfo[opName].outPortReadyDelay;
   }
-<<<<<<< HEAD
-=======
-
->>>>>>> a152111d2491cfda88e44e7dad2a61ecc46f296b
   return unitDelay + inPortDelay + outPortDelay;
 }
 
@@ -209,11 +171,7 @@ buffer::getUnitLatency(Operation *op,
 
 LogicalResult
 buffer::setChannelBufProps(std::vector<Value> &channels,
-<<<<<<< HEAD
-                           DenseMap<Value, ChannelBufProps> &ChannelBufProps,
-=======
                            DenseMap<Value, ChannelBufProps> &channelBufProps,
->>>>>>> a152111d2491cfda88e44e7dad2a61ecc46f296b
                            std::map<std::string, UnitInfo> &unitInfo) {
   for (auto &ch : channels) {
     Operation *srcOp = ch.getDefiningOp();
@@ -227,15 +185,6 @@ buffer::setChannelBufProps(std::vector<Value> &channels,
     std::string dstName = dstOp->getName().getStringRef().str();
     // set merge with multiple input to have at least one transparent buffer
     if (isa<handshake::MergeOp>(srcOp) && srcOp->getNumOperands() > 1)
-<<<<<<< HEAD
-      ChannelBufProps[ch].minTrans = 1;
-
-    // TODO: set selectOp always select the frequent input
-    if (isa<arith::SelectOp>(srcOp))
-      if (srcOp->getResult(0) == ch) {
-        ChannelBufProps[ch].maxTrans = 0;
-        ChannelBufProps[ch].minOpaque = 0;
-=======
       channelBufProps[ch].minTrans = 1;
 
     // TODO: set selectOp always select the frequent input
@@ -243,34 +192,16 @@ buffer::setChannelBufProps(std::vector<Value> &channels,
       if (dstOp->getOperand(2) == ch) {
         channelBufProps[ch].maxTrans = 0;
         channelBufProps[ch].minOpaque = 0;
->>>>>>> a152111d2491cfda88e44e7dad2a61ecc46f296b
       }
 
     if (isa<handshake::MemoryControllerOp>(srcOp) ||
         isa<handshake::MemoryControllerOp>(dstOp)) {
-<<<<<<< HEAD
-      ChannelBufProps[ch].minOpaque = 0;
-      ChannelBufProps[ch].maxTrans = 0;
-=======
       channelBufProps[ch].maxOpaque = 0;
       channelBufProps[ch].maxTrans = 0;
->>>>>>> a152111d2491cfda88e44e7dad2a61ecc46f296b
     }
 
     // set channel buffer properties w.r.t to input file
     if (unitInfo.count(srcName) > 0) {
-<<<<<<< HEAD
-      ChannelBufProps[ch].minTrans += unitInfo[srcName].outPortTransBuf;
-      ChannelBufProps[ch].minOpaque += unitInfo[srcName].outPortOpBuf;
-    }
-
-    if (unitInfo.count(dstName) > 0) {
-      ChannelBufProps[ch].minTrans += unitInfo[dstName].inPortTransBuf;
-      ChannelBufProps[ch].minOpaque += unitInfo[dstName].inPortOpBuf;
-    }
-
-    if (ChannelBufProps[ch].minTrans > 0 && ChannelBufProps[ch].minOpaque > 0)
-=======
       channelBufProps[ch].minTrans += unitInfo[srcName].outPortTransBuf;
       channelBufProps[ch].minOpaque += unitInfo[srcName].outPortOpBuf;
     }
@@ -281,21 +212,11 @@ buffer::setChannelBufProps(std::vector<Value> &channels,
     }
 
     if (channelBufProps[ch].minTrans > 0 && channelBufProps[ch].minOpaque > 0)
->>>>>>> a152111d2491cfda88e44e7dad2a61ecc46f296b
       return failure(); // cannot satisfy the constraint
   }
   return success();
 }
 
-<<<<<<< HEAD
-/// Parse the JSON data to a vector of pair {bitwidth, info}
-static void parseBitWidthPair(json jsonData,
-                              std::vector<std::pair<unsigned, double>> &data) {
-  for (auto it = jsonData.begin(); it != jsonData.end(); ++it) {
-    auto key = stoi(it.key());
-    double value = it.value();
-    data.emplace_back(key, value);
-=======
 static void parseBitWidthPair(llvm::json::Object &jsonData,
                               std::vector<std::pair<unsigned, double>> &data) {
   for (const auto &[bitWidth, value] : jsonData) {
@@ -303,7 +224,6 @@ static void parseBitWidthPair(llvm::json::Object &jsonData,
     unsigned key = std::stoi(bitKey.str());
     double info = value.getAsNumber().value();
     data.emplace_back(key, info);
->>>>>>> a152111d2491cfda88e44e7dad2a61ecc46f296b
   }
 }
 
@@ -311,10 +231,6 @@ LogicalResult buffer::parseJson(const std::string &jsonFile,
                                 std::map<std::string, UnitInfo> &unitInfo) {
 
   // Operations that is supported to use its time information.
-<<<<<<< HEAD
-  size_t pos = 0;
-=======
->>>>>>> a152111d2491cfda88e44e7dad2a61ecc46f296b
   std::vector<std::string> opNames = {
       "arith.cmpi",        "arith.addi",
       "arith.subi",        "arith.muli",
@@ -332,62 +248,12 @@ LogicalResult buffer::parseJson(const std::string &jsonFile,
       "arith.select",      "handshake.mux"};
   std::string opName;
 
-<<<<<<< HEAD
-  std::ifstream file(jsonFile);
-  if (!file.is_open()) {
-=======
   std::ifstream inputFile(jsonFile);
   if (!inputFile.is_open()) {
->>>>>>> a152111d2491cfda88e44e7dad2a61ecc46f296b
     llvm::errs() << "Failed to open file.\n";
     return failure();
   }
 
-<<<<<<< HEAD
-  // Read the file contents into a string
-  json data;
-  file >> data;
-  for (std::string &op : opNames) {
-    auto unitInfoJson = data[op];
-    auto latencyJson = unitInfoJson["latency"];
-    // parse the bitwidth and its corresponding latency for data
-    parseBitWidthPair(unitInfoJson["latency"], unitInfo[op].latency);
-    parseBitWidthPair(unitInfoJson["delay"]["data"], unitInfo[op].dataDelay);
-    parseBitWidthPair(unitInfoJson["inport"]["delay"]["data"],
-                      unitInfo[op].inPortDataDelay);
-    parseBitWidthPair(unitInfoJson["outport"]["delay"]["data"],
-                      unitInfo[op].outPortDataDelay);
-
-    // parse the bitwidth and its corresponding latency for valid and ready
-    // The valid and ready signal is 1 bit
-    double validDelay = unitInfoJson["delay"]["valid"]["1"];
-    unitInfo[op].validDelay = validDelay;
-    double readyDelay = unitInfoJson["delay"]["ready"]["1"];
-    unitInfo[op].readyDelay = readyDelay;
-    unitInfo[op].inPortValidDelay =
-        unitInfoJson["inport"]["delay"]["valid"]["1"];
-    unitInfo[op].inPortReadyDelay =
-        unitInfoJson["inport"]["delay"]["ready"]["1"];
-    unitInfo[op].outPortValidDelay =
-        unitInfoJson["outport"]["delay"]["valid"]["1"];
-    unitInfo[op].outPortReadyDelay =
-        unitInfoJson["outport"]["delay"]["ready"]["1"];
-
-    unitInfo[op].VR = unitInfoJson["delay"]["VR"];
-    unitInfo[op].DV = unitInfoJson["delay"]["CV"];
-    unitInfo[op].DR = unitInfoJson["delay"]["CR"];
-    unitInfo[op].VD = unitInfoJson["delay"]["VD"];
-    unitInfo[op].VC = unitInfoJson["delay"]["VC"];
-
-    unitInfo[op].inPortTransBuf = unitInfoJson["inport"]["transparentBuffer"];
-    unitInfo[op].inPortOpBuf = unitInfoJson["inport"]["opaqueBuffer"];
-
-    unitInfo[op].outPortTransBuf = unitInfoJson["outport"]["transparentBuffer"];
-    unitInfo[op].outPortOpBuf = unitInfoJson["outport"]["opaqueBuffer"];
-
-    if (unitInfoJson.is_discarded())
-      return failure();
-=======
   // Read the JSON content from the file
   std::string jsonString;
   std::string line;
@@ -448,6 +314,14 @@ LogicalResult buffer::parseJson(const std::string &jsonFile,
                                          ->getNumber("1")
                                          .value();
 
+    unitInfo[op].VR = unitInfoJson->getObject("delay")->getNumber("VR").value();
+    unitInfo[op].DV = unitInfoJson->getObject("delay")->getNumber("CV").value();
+    unitInfo[op].DR = unitInfoJson->getObject("delay")->getNumber("CR").value();
+    unitInfo[op].VD = unitInfoJson->getObject("delay")->getNumber("VD").value();
+    unitInfo[op].VC = unitInfoJson->getObject("delay")->getNumber("VC").value();
+
+    // parse the prerequisite of buffer placement corresponding to the channels
+    // connected to input port and output port
     unitInfo[op].inPortTransBuf = unitInfoJson->getObject("inport")
                                       ->getNumber("transparentBuffer")
                                       .value();
@@ -459,7 +333,6 @@ LogicalResult buffer::parseJson(const std::string &jsonFile,
                                        .value();
     unitInfo[op].outPortOpBuf =
         unitInfoJson->getObject("outport")->getNumber("opaqueBuffer").value();
->>>>>>> a152111d2491cfda88e44e7dad2a61ecc46f296b
   }
 
   return success();
