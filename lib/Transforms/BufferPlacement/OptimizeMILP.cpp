@@ -940,7 +940,6 @@ LogicalResult buffer::placeBufferInCFDFCircuit(
   createModelObjective(modelBuf, circtThrpts, cfdfcList, channelVars);
 
   modelBuf.getEnv().set(GRB_DoubleParam_TimeLimit, timeLimit);
-  modelBuf.write("/home/yuxuan/Downloads/model.lp");
   modelBuf.optimize();
 
   //  The result is optimal if the model is solved to optimality or the time
