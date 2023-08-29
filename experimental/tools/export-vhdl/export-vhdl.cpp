@@ -46,6 +46,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <cstdlib>
+
 #define LIBRARY_PATH "experimental/tools/export-vhdl/library.json"
 
 using namespace llvm;
@@ -60,25 +62,28 @@ typedef llvm::StringMap<size_t> StoreComponentNumbers;
 typedef llvm::SmallVector<std::string> string_arr;
 typedef llvm::SmallVector<int> integer_arr;
 
-std::string extractModName(StringRef extName);
-std::string extractModGroup(std::string modName);
-std::string extractModOwnName(std::string modName);
-std::string extractModParameters(StringRef extName);
-
-/*---------------------------------
-             GENERAL
------------------------------------*/
+//===----------------------------------------------------------------------===//
+// GENERAL
+//===----------------------------------------------------------------------===//
 
 // Just an inner description in VHDLComponentLibrary lib
 struct VHDLParameter {
-  VHDLParameter(std::string tempName = "", std::string tempType = "")
-      : name{tempName}, type{tempType} {};
+  VHDLParameter(std::string tempName = "", std::string tempType = "",
+                std::string tempSize = "")
+      : name{tempName}, type{tempType}, size{tempSize} {};
   std::string getName() const { return name; }
   std::string getType() const { return type; }
+  std::string getSize() const {
+    if (size.empty())
+      return "1";
+    else
+      return size;
+  }
 
 private:
   std::string name;
   std::string type;
+  std::string size;
 };
 
 // Description of the component in the lib
@@ -86,137 +91,120 @@ struct VHDLModuleDescription {
 
   VHDLModuleDescription(std::string tempPath = {},
                         std::string tempConcrMethod = {},
-                        llvm::SmallVector<VHDLParameter> tempParameters = {})
+                        llvm::SmallVector<std::string> tempGenerators = {},
+                        llvm::SmallVector<std::string> tempGenerics = {},
+                        llvm::SmallVector<std::string> tempExtras = {},
+                        llvm::SmallVector<VHDLParameter> tempInputPorts = {},
+                        llvm::SmallVector<VHDLParameter> tempOutputPorts = {})
       : path(tempPath), concretizationMethod(tempConcrMethod),
-        parameters(tempParameters) {}
+        generators(tempGenerators), generics(tempGenerics), extras(tempExtras),
+        inputPorts(tempInputPorts), outputPorts(tempOutputPorts) {}
   std::string getPath() const { return path; }
   std::string getConcretizationMethod() const { return concretizationMethod; };
-  const llvm::SmallVector<VHDLParameter> &getParameters() const {
-    return parameters;
+  const llvm::SmallVector<std::string> &getGenerators() const {
+    return generators;
   }
-  VHDLModule concretize(std::string modName, std::string exactModName,
-                        string_arr inputPorts, string_arr outputPorts,
-                        std::string modParameters) const;
+  const llvm::SmallVector<std::string> &getGenerics() const { return generics; }
+  const llvm::SmallVector<std::string> &getExtras() const { return extras; }
+  const llvm::SmallVector<VHDLParameter> &getInputPorts() const {
+    return inputPorts;
+  }
+  const llvm::SmallVector<VHDLParameter> &getOutputPorts() const {
+    return outputPorts;
+  }
+  VHDLModule concretize(std::string modName, std::string modParameters) const;
 
 private:
   std::string path;
   std::string concretizationMethod;
-  llvm::SmallVector<VHDLParameter> parameters;
+  // parameters used in generators. Values're taken from discriminating
+  // parameters
+  llvm::SmallVector<std::string> generators;
+  // parameters for instantiation
+  llvm::SmallVector<std::string> generics;
+  // extra parameters that we may need in future
+  llvm::SmallVector<std::string> extras;
+  // all input ports
+  llvm::SmallVector<VHDLParameter> inputPorts;
+  // all output ports
+  llvm::SmallVector<VHDLParameter> outputPorts;
 };
 
 // VHDL module, that is VHDLModuleDescription + actual parameters data
 struct VHDLModule {
-  VHDLModule(std::string tempModName,
-             llvm::SmallVector<std::string> tempInputPorts,
-             llvm::SmallVector<std::string> tempOutputPorts,
-             std::string tempMtext,
-             llvm::StringMap<std::string> tempModParameters,
+  VHDLModule(std::string tempModName, std::string tempMtext,
+             llvm::SmallVector<std::string> tempModParameters,
              const VHDLModuleDescription &tempModDesc)
-      : modName(tempModName), inputPorts(tempInputPorts),
-        outputPorts(tempOutputPorts), modText(tempMtext),
+      : modName(tempModName), modText(tempMtext),
         modParameters(tempModParameters), modDesc(tempModDesc) {}
   std::string getModName() const { return modName; }
   const std::string &getModText() const { return modText; }
-  const llvm::StringMap<std::string> &getModParameters() const {
+  const llvm::SmallVector<std::string> &getModParameters() const {
     return modParameters;
   }
   const VHDLModuleDescription &getModDesc() const { return modDesc; }
-  const llvm::SmallVector<std::string> &getInputPorts() const {
-    return inputPorts;
-  }
-  const llvm::SmallVector<std::string> &getOutputPorts() const {
-    return outputPorts;
-  }
 
 private:
+  // component's name
   std::string modName;
-  llvm::SmallVector<std::string> inputPorts;
-  llvm::SmallVector<std::string> outputPorts;
+  // component's definition & architecture
   std::string modText;
-  llvm::StringMap<std::string> modParameters;
+  // discriminating parameters
+  llvm::SmallVector<std::string> modParameters;
+  // reference to the corresponding template in VHDLComponentLibrary
   const VHDLModuleDescription &modDesc;
 };
 
-// delete extra spaces from a string
-void deleteSpaces(std::string &str) {
-  str.erase(remove_if(str.begin(), str.end(), isspace), str.end());
-}
-
-// extract a number from the middle of the given string and move it to it's end
-std::string moveNumber(std::string const &str) {
-  auto copystr = str;
-  std::string dig{};
-  auto ind = std::find_if(str.begin(), str.end(), ::isdigit);
-  if (ind != str.end()) {
-    while (isdigit(*ind)) {
-      dig += (*ind);
-      ++ind;
-    }
-    auto i = copystr.find(dig);
-    copystr = copystr.substr(0, i) + copystr.substr(i + dig.length());
-    copystr += '@' + dig;
+// split the string with discriminating parameters into string vector for
+// convenience
+llvm::SmallVector<std::string>
+parseDiscriminatingParameters(std::string &modParameters) {
+  llvm::SmallVector<std::string> s{};
+  std::stringstream str(modParameters);
+  std::string temp;
+  while (str.good()) {
+    std::getline(str, temp, '_');
+    s.push_back(temp);
   }
-  return copystr;
+  return s;
 }
 
 // Get a module corresponding the given component and data
 VHDLModule VHDLModuleDescription::concretize(std::string modName,
-                                             std::string exactModName,
-                                             string_arr inputPorts,
-                                             string_arr outputPorts,
                                              std::string modParameters) const {
-  // parse the string with parameters to get a vector for convenience
-  llvm::StringMap<std::string> modParametersVec;
-  std::stringstream ss(modParameters);
-  for (auto &i : parameters) {
-    std::string type = i.getType();
-    std::string name{};
-    std::getline(ss, name, '_');
-    deleteSpaces(name);
-    if (type == "string_arr") {
-      std::string testName = "smth";
-      while (ss.good()) {
-        std::getline(ss, testName, '_');
-        name += testName + '_';
-      }
-    }
-    modParametersVec.insert(std::pair(i.getName(), name));
-  }
-
+  llvm::SmallVector<std::string> modParametersVec =
+      parseDiscriminatingParameters(modParameters);
+  std::string modText{};
   // open a file with component concretization data
   std::ifstream file;
-  if (modName != exactModName) {
-    std::string newPath{};
-
-    if (exactModName == "predicate") {
-      newPath =
-          path + "/" + modParametersVec.find("PREDICATE")->getValue() + ".vhd";
-      modName += '_' + modParametersVec.find("PREDICATE")->getValue();
-    } else {
-      auto libNameLast = extractModOwnName(modName);
-      int ind = path.find(libNameLast);
-      newPath = path.substr(0, ind) + extractModOwnName(exactModName) + ".vhd";
-      modName = exactModName;
-    }
-    file.open(newPath);
-  } else {
-    file.open(path);
-  }
-
-  if (!file.is_open()) {
-    llvm::errs() << "Filepath is uncorrect\n";
-    file.close();
-    return VHDLModule(modName, inputPorts, outputPorts, {}, modParametersVec,
-                      *this);
-  }
-  // Read as file
+  // read as file
   std::stringstream buffer;
+  if (concretizationMethod == "GENERATOR") {
+    // in case of generator we're looking for binary
+    std::string commandLineArguments;
+    auto i = modParametersVec.begin();
+    size_t k = generators.size();
+    // collecting discriminating params for command line
+    while (k > 0) {
+      commandLineArguments += " " + (*i);
+      ++i;
+      --k;
+    }
+    // create a temporary text.txt
+    std::string resultPath = path + commandLineArguments + " > test.txt";
+    std::system(resultPath.c_str());
+    file.open("test.txt");
+    // ... and delete it
+    std::system("rm test.txt");
+  } else if (concretizationMethod == "GENERIC") {
+    // in case of generic we're looking for ordinary file
+    file.open(path);
+  } else
+    // error
+    llvm::errs() << "Wrong concredization method";
   buffer << file.rdbuf();
-  std::string BufferStr = buffer.str();
-  file.close();
-  // build a module
-  return VHDLModule(modName, inputPorts, outputPorts, BufferStr,
-                    modParametersVec, *this);
+  modText = buffer.str();
+  return VHDLModule(modName, modText, modParametersVec, *this);
 }
 
 // Get a cpp representation for given .json file
@@ -251,139 +239,199 @@ VHDLComponentLibrary parseJSON() {
   }
   // parse elements in json
   for (auto item : *jsonLib->getAsObject()) {
-    auto key_name = item.first.str();
-    auto path = item.second.getAsObject()
-                    ->find("path")
-                    ->second.getAsString()
-                    .value()
-                    .str();
-    auto concretizationMethod = item.second.getAsObject()
-                                    ->find("concretization_method")
-                                    ->second.getAsString()
-                                    .value()
-                                    .str();
-    auto parameters =
-        item.getSecond().getAsObject()->get("parameters")->getAsArray();
+    // moduleName is either "arith" or "handshake"
+    std::string moduleName = item.getFirst().str();
+    auto moduleArray = item.getSecond().getAsArray();
+    for (auto c = moduleArray->begin(); c != moduleArray->end(); ++c) {
+      // c is iterator, which points on a specific component's scheme inside
+      // arith / handshake class
+      auto obj = c->getAsObject();
+      auto jsonComponents = obj->get("components")->getAsArray();
+      auto jsonConcretizationMethod =
+          obj->get("concretization_method")->getAsString();
+      auto jsonGenerators = obj->get("generators")->getAsArray();
+      auto jsonGenerics = obj->get("generics")->getAsArray();
+      auto jsonExtras = obj->get("extras")->getAsArray();
+      auto jsonPorts = obj->get("ports")->getAsObject();
+      // creating corresponding VHDLModuleDescription variables
+      std::string concretizationMethod = jsonConcretizationMethod.value().str();
 
-    llvm::SmallVector<VHDLParameter> components{};
-    for (auto i = parameters->begin(); i != parameters->end(); ++i) {
-      auto obj = i->getAsObject();
-      auto name = obj->get("name")->getAsString().value().str();
-      auto type = obj->get("type")->getAsString().value().str();
-      components.push_back(VHDLParameter(name, type));
+      llvm::SmallVector<std::string> generators{};
+      for (auto i = jsonGenerators->begin(); i != jsonGenerators->end(); ++i)
+        generators.push_back(i->getAsString().value().str());
+
+      llvm::SmallVector<std::string> generics{};
+      for (auto i = jsonGenerics->begin(); i != jsonGenerics->end(); ++i)
+        generics.push_back(i->getAsString().value().str());
+
+      llvm::SmallVector<std::string> extras{};
+      for (auto i = jsonExtras->begin(); i != jsonExtras->end(); ++i)
+        extras.push_back(i->getAsString().value().str());
+
+      llvm::SmallVector<VHDLParameter> inputPorts{};
+      auto jsonInputPorts = jsonPorts->get("in")->getAsArray();
+      for (auto i = jsonInputPorts->begin(); i != jsonInputPorts->end(); ++i) {
+        auto ob = i->getAsObject();
+        auto name = ob->get("name")->getAsString().value().str();
+        auto type = ob->get("type")->getAsString().value().str();
+        std::string size{};
+        if (ob->find("size") != ob->end())
+          size = ob->get("size")->getAsString().value().str();
+        inputPorts.push_back(VHDLParameter(name, type, size));
+      }
+
+      llvm::SmallVector<VHDLParameter> outputPorts{};
+      auto jsonOutputPorts = jsonPorts->get("out")->getAsArray();
+      for (auto i = jsonOutputPorts->begin(); i != jsonOutputPorts->end();
+           ++i) {
+        auto ob = i->getAsObject();
+        auto name = ob->get("name")->getAsString().value().str();
+        auto type = ob->get("type")->getAsString().value().str();
+        std::string size{};
+        if (ob->find("size") != ob->end())
+          size = ob->get("size")->getAsString().value().str();
+        outputPorts.push_back(VHDLParameter(name, type, size));
+      }
+
+      for (auto i = jsonComponents->begin(); i != jsonComponents->end(); ++i) {
+        auto ob = i->getAsObject();
+        auto name = ob->get("name")->getAsString().value().str();
+        auto path = ob->get("path")->getAsString().value().str();
+        std::string key_name = moduleName + "_" + name;
+        // inserting our component into library
+        m.insert(std::pair(key_name,
+                           VHDLModuleDescription(path, concretizationMethod,
+                                                 generators, generics, extras,
+                                                 inputPorts, outputPorts)));
+      }
     }
-
-    m.insert(std::pair(key_name, VHDLModuleDescription(
-                                     path, concretizationMethod, components)));
   }
   lib.close();
-
   return m;
 }
 
-/*---------------------------------
-             CONCRETIZATION
------------------------------------*/
+// Check if library is correct
+void testLib(VHDLComponentLibrary &m) {
+  int num = 1;
+  for (auto &[keyl, val] : m) {
+    llvm::outs() << "# "
+                    "===-------------------------------------------------------"
+                    "---------------=== #\n";
+    llvm::outs() << "(" << num << ") " << keyl << "\n";
+    ++num;
+    llvm::outs() << "# "
+                    "===-------------------------------------------------------"
+                    "---------------=== #\n";
+    std::ifstream file;
+    file.open(val.getPath());
 
-// Get component main name (e.g. handshake.fork)
-std::string extractModName(StringRef extName) {
+    if (!file.is_open()) {
+      errs() << "Filepath is uncorrect\n";
+      file.close();
+      return;
+    }
+    file.close();
+    llvm::outs() << "Component:" << keyl << "\n"
+                 << "path: " << val.getPath()
+                 << "\nconcr method: " << val.getConcretizationMethod()
+                 << "\ngenerator params:\n";
+    for (auto &i : val.getGenerators()) {
+      llvm::outs() << i << " ";
+    }
+    llvm::outs() << "\ngenerics params:\n ";
+    for (auto &i : val.getGenerics()) {
+      llvm::outs() << i << " ";
+    }
+    llvm::outs() << "\nextra params:\n";
+    for (auto &i : val.getExtras()) {
+      llvm::outs() << i << " ";
+    }
+    llvm::outs() << "\ninput ports:\n";
+    for (auto &i : val.getInputPorts()) {
+      llvm::outs() << "[" << i.getName() << ", " << i.getType() << "]\n";
+    }
+    llvm::outs() << "output ports:\n";
+    for (auto &i : val.getOutputPorts()) {
+      llvm::outs() << "[" << i.getName() << ", " << i.getType() << ", "
+                   << i.getSize() << "]\n";
+    }
+  }
+}
+//===----------------------------------------------------------------------===//
+// CONCRETIZATION
+//===----------------------------------------------------------------------===//
+
+// extName consists of modName and modParameters (e.g. handshake_fork_3_32) and
+// this function splits these parameters into 2 strings (in our example
+// handshake_fork and 3_32 respectively)
+std::pair<std::string, std::string> splitExtName(StringRef extName) {
   size_t first_ = extName.find('_', 0);
   size_t second_ = extName.find('_', first_ + 1);
-  std::string firstPart =
+  std::string componentPart =
       extName.substr(first_ + 1, second_ - first_ - 1).str();
-  if (firstPart == "lazy" || firstPart == "control" || firstPart == "cond" ||
-      firstPart == "d" || firstPart == "mem") {
+  if (componentPart == "lazy" || componentPart == "control" ||
+      componentPart == "cond" || componentPart == "d" ||
+      componentPart == "mem" || componentPart == "start" ||
+      componentPart == "end") {
     second_ = extName.find('_', second_ + 1);
   }
-  std::string mod_name = extName.substr(0, second_).str();
-  mod_name[first_] = '.';
-  return mod_name;
-}
-
-// Get component's group (either handshake or arith)
-std::string extractModGroup(std::string modName) {
-  size_t firstDot = modName.find('.', 0);
-  std::string modGroup = modName.substr(0, firstDot);
-  return modGroup;
-}
-
-// Get component's own name (fork, addi etc)
-std::string extractModOwnName(std::string modName) {
-  size_t firstDot = modName.find('.', 0);
-  std::string modOwn =
-      modName.substr(firstDot + 1, modName.size() - firstDot - 1);
-  return modOwn;
-}
-
-// Get corresponding parameters (e.g. 2_32 for a fork)
-std::string extractModParameters(StringRef extName) {
-  std::string modName = extractModName(extName);
-  std::string modParameters = extName.substr(modName.size() + 1).str();
-  return modParameters;
+  std::string modName = extName.substr(0, second_).str();
+  std::string modParameters = extName.substr(second_ + 1).str();
+  return std::pair(modName, modParameters);
 }
 
 // get .vhd module description
-VHDLModule getMod(circt::hw::HWModuleExternOp &extModOp,
-                  VHDLComponentLibrary &jsonLib) {
-  StringRef extName = extModOp.getModuleName();
-
-  // extract external module name
-  std::string modName = extractModName(extName);
-
-  // extract module group
-  std::string modGroup = extractModGroup(modName);
-
-  // extract external module parameters
-  std::string modParameters = extractModParameters(extName);
+VHDLModule getMod(StringRef extName, VHDLComponentLibrary &jsonLib) {
+  auto p = splitExtName(extName);
+  std::string modName = p.first;
+  std::string modParameters = p.second;
 
   // find external module in VHDLComponentLibrary
-  llvm::StringMapIterator<VHDLModuleDescription> comp;
-  if (modGroup == "arith") {
-    // just 3 templates for all arithmetic operations to save memory
-    if (modName == "arith.extsi" || modName == "arith.extui" ||
-        modName == "arith.trunci") {
-      comp = jsonLib.find("arith.extsi");
-    } else if (modName == "arith.cmpf" || modName == "arith.cmpi") {
-      comp = jsonLib.find(modName);
-    } else {
-      comp = jsonLib.find("arith.addf");
-    }
-  } else {
-    comp = jsonLib.find(modName);
-  }
+  llvm::StringMapIterator<VHDLModuleDescription> comp = jsonLib.find(modName);
 
   if (comp == jsonLib.end()) {
     llvm::errs() << "Unable to find the element in the library\n";
-    return VHDLModule({}, {}, {}, {}, {}, {});
+    return VHDLModule({}, {}, {}, {});
   }
   const VHDLModuleDescription &desc = (*comp).second;
-
-  llvm::SmallVector<std::string> inputPorts{};
-  llvm::SmallVector<std::string> outputPorts{};
-  // fill input ports
-  for (auto &k : extModOp.getPorts().inputs) {
-    inputPorts.push_back(moveNumber(k.getName().str()));
-  }
-
-  // fill output ports
-  for (auto &k : extModOp.getPorts().outputs) {
-    outputPorts.push_back(moveNumber(k.getName().str()));
-  }
-
-  // cmpi && cmpf are defined with a predicate also, which exists inside
-  // discriminating parameters
-  if (modName == "arith.cmpf" || modName == "arith.cmpi") {
-    modName = "predicate";
-  }
-  auto mod = desc.concretize((*comp).getKey().str(), modName, inputPorts,
-                             outputPorts, modParameters);
+  auto mod = desc.concretize(modName, modParameters);
 
   return mod;
 };
 
-/*---------------------------------
-             INSTANTIATION
------------------------------------*/
+// Test how modules are printed on concretization phase
+void testModulesConcretization(mlir::OwningOpRef<mlir::ModuleOp> &module,
+                               VHDLComponentLibrary &m) {
+  StoreComponentNumbers comp{};
+  int num = 1;
+  for (auto extModOp : module->getOps<hw::HWModuleExternOp>()) {
+    auto extName = extModOp.getModuleName();
+    llvm::outs() << "# "
+                    "===-------------------------------------------------------"
+                    "---------------=== #\n";
+    auto i = getMod(extName, m);
+
+    if (i.getModText().empty()) {
+      llvm::outs() << "(" << num << ") " << extName
+                   << " still doesn't exist in the lib\n";
+      llvm::outs() << "# "
+                      "===-----------------------------------------------------"
+                      "-----------------=== #\n";
+    } else {
+      llvm::outs() << "(" << num << ") " << i.getModName() << "\n";
+      llvm::outs() << "# "
+                      "===-----------------------------------------------------"
+                      "-----------------=== #\n";
+      llvm::outs() << i.getModText() << "\n";
+    }
+    ++num;
+  }
+}
+
+//===----------------------------------------------------------------------===//
+// INSTANTIATION
+//===----------------------------------------------------------------------===//
+
 // For component's name on instantiation: get a number of next similar component
 // (e.g fork) or add a new component to SoreComponentNumbers library (numeration
 // starts with 0)
@@ -398,171 +446,191 @@ size_t getModNumber(std::string modName, StoreComponentNumbers &n) {
   }
 }
 
-// Get list of parameters in brackets on instantiation.
-// That's important that parameters in both vectors, modParameters (with
-// parameters) and substr (name in brackets in modText file) have the same
-// order.
-std::string getExactValue(std::string substr, VHDLModule &mod) {
-  std::stringstream strStr(substr);
-  auto modParameters = mod.getModParameters();
-  std::string name;
-  std::string type;
-  std::string result{};
-
-  while (strStr.good()) {
-    std::getline(strStr, name, ':');
-    deleteSpaces(name);
-    std::getline(strStr, type, ';');
-    deleteSpaces(type);
-    if (modParameters.find(name) != modParameters.end()) {
-      result += modParameters.find(StringRef(name))->getValue();
-    } else {
-      llvm::errs() << "This argument neither parameter nor constant!\n";
-      continue;
-    }
-    if (strStr.good()) {
-      result += ", ";
-    }
-  }
-  return result;
-}
-
 // Get full description = instantiation = for a given module
-// To Do: change arrays from in_0... to in[0]...
-std::string getEntityDeclaration(VHDLModule &mod, size_t modNumber) {
-  std::string modTextInstance{};
-  std::string modNameFull = mod.getModName();
-  // get an own component's name (e g fork)
-  std::string modName = extractModOwnName(modNameFull);
-  if (modName == "end" || modName == "start") {
-    modName += "_node";
+std::string getInstanceDeclaration(VHDLModule &mod, size_t modNumber) {
+  // header
+  std::string instance{};
+  std::string shortName =
+      mod.getModName().substr(mod.getModName().find('_') + 1);
+  std::string numberedName = shortName + "_n" + std::to_string(modNumber);
+  instance +=
+      numberedName + " : entity work." + shortName + "(arch) generic map (";
+  auto startInd = mod.getModDesc().getGenerators().size();
+  auto generics = mod.getModDesc().getGenerics();
+  auto modParameters = mod.getModParameters();
+  auto n = startInd + generics.size();
+  for (auto i = startInd; i < n; ++i) {
+    instance += modParameters[i];
+    if (i == n - 1)
+      instance += ")";
+    else
+      instance += ", ";
   }
-  modTextInstance += modName + "_" + std::to_string(modNumber) +
-                     ": entity work." + modName + "(arch) generic map(";
-
-  // find a substring with parameters inside modText
-  std::string modText = mod.getModText();
-  auto tempName = " " + modName + " ";
-  auto ind = modText.find(tempName);
-  auto firstBr = modText.find('(', ind);
-  auto lastBr = modText.find(')', ind);
-  auto substr = modText.substr(firstBr + 1, lastBr - firstBr - 1);
-  deleteSpaces(substr);
-  // get corresponding values
-  auto exactValueStr = getExactValue(substr, mod);
-  modTextInstance += exactValueStr + ")\nport map(\n";
-  // list of arrays & signals
-  modTextInstance +=
-      "clk => " + modName + "_" + std::to_string(modNumber) + "_clk,\n";
-  modTextInstance +=
-      "rst => " + modName + "_" + std::to_string(modNumber) + "_rst,\n";
-  auto inputs = mod.getInputPorts();
-  auto outputs = mod.getOutputPorts();
-  for (auto &j : inputs) {
-    if (j != "clock" && j != "reset") {
-      // special format implementation for ... => ...
-      auto ind = j.find('@', 0);
-      if (ind < j.length()) {
-        j[ind] = '(';
-        modTextInstance +=
-            j + ") => " + modName + "_" + std::to_string(modNumber);
-        j[ind] = '_';
-        modTextInstance += "_" + j + ",\n";
+  instance += "\nport map(\n";
+  // body
+  auto inputPorts = mod.getModDesc().getInputPorts();
+  auto outputPorts = mod.getModDesc().getOutputPorts();
+  // clock & reset
+  instance += "clk => " + numberedName + "_clk,\n" + "rst => " + numberedName +
+              "_rst,\n";
+  // inputs
+  for (auto i : inputPorts) {
+    std::string paramName = i.getName();
+    std::string paramType = i.getType();
+    std::string paramSize = i.getSize();
+    size_t inp = 0;
+    // find the size of array if the component's multidimensional
+    if (paramSize != "1") {
+      size_t k = 0;
+      for (auto &j : generics) {
+        if (j == paramSize) {
+          inp = std::stoi(modParameters[startInd + k]);
+          break;
+        }
+        ++k;
+      }
+    }
+    if (paramType == "dataflow") {
+      // have param, param_valid, param_ready
+      if (inp > 0) {
+        for (auto j = (size_t)0; j < inp; ++j) {
+          instance += paramName + "(" + std::to_string(j) + ") => " +
+                      numberedName + "_" + paramName + "_" + std::to_string(j) +
+                      ",\n";
+        }
+        for (auto j = (size_t)0; j < inp; ++j) {
+          instance += paramName + "_valid(" + std::to_string(j) + ") => " +
+                      numberedName + "_" + paramName + "_valid_" +
+                      std::to_string(j) + ",\n";
+        }
+        for (auto j = (size_t)0; j < inp; ++j) {
+          instance += paramName + "_ready(" + std::to_string(j) + ") => " +
+                      numberedName + "_" + paramName + "_ready_" +
+                      std::to_string(j) + ",\n";
+        }
       } else {
-        modTextInstance += j + " => " + modName + "_" +
-                           std::to_string(modNumber) + "_" + j + ",\n";
+        instance += paramName + " => " + numberedName + "_" + paramName + "\n";
+        instance += paramName + "_valid => " + numberedName + "_" + paramName +
+                    "_valid,\n";
+        instance += paramName + "_ready => " + numberedName + "_" + paramName +
+                    "_ready,\n";
       }
-    }
-  }
-  for (auto &j : outputs) {
-    if (j != "clock" && j != "reset") {
-      // special format implementation for ... => ...
-      auto ind = j.find('@', 0);
-      if (ind < j.length()) {
-        j[ind] = '(';
-        modTextInstance +=
-            j + ") => " + modName + "_" + std::to_string(modNumber);
-        j[ind] = '_';
-        modTextInstance += "_" + j + ",\n";
+    } else if (paramType == "control") {
+      // have only param_ready & param_valid
+      if (inp > 0) {
+        for (auto j = (size_t)0; j < inp; ++j) {
+          instance += paramName + "_valid(" + std::to_string(j) + ") => " +
+                      numberedName + "_" + paramName + "_valid_" +
+                      std::to_string(j) + ",\n";
+        }
+        for (auto j = (size_t)0; j < inp; ++j) {
+          instance += paramName + "_ready(" + std::to_string(j) + ") => " +
+                      numberedName + "_" + paramName + "_ready_" +
+                      std::to_string(j) + ",\n";
+        }
       } else {
-        modTextInstance += j + " => " + modName + "_" +
-                           std::to_string(modNumber) + "_" + j + ",\n";
+        instance += paramName + "_valid => " + numberedName + "_" + paramName +
+                    "_valid,\n";
+        instance += paramName + "_ready => " + numberedName + "_" + paramName +
+                    "_ready,\n";
       }
-    }
+    } else if (paramType == "signal") {
+      // only param, without valid & ready signals
+      if (inp > 0) {
+        for (auto j = (size_t)0; j < inp; ++j) {
+          instance += paramName + "(" + std::to_string(j) + ") => " +
+                      numberedName + "_" + paramName + "_" + std::to_string(j) +
+                      ",\n";
+        }
+      } else {
+        instance += paramName + " => " + numberedName + "_" + paramName + ",\n";
+      }
+    } else
+      // error
+      llvm::errs() << "Wrong input port's type\n";
   }
-  modTextInstance += ");\n";
-  return modTextInstance;
-}
-
-/*---------------------------------
-             TESTING
------------------------------------
-*/
-
-// Check if library is correct
-void testLib(VHDLComponentLibrary &m) {
-  for (auto &[keyl, val] : m) {
-    std::ifstream file;
-    file.open(val.getPath());
-
-    if (!file.is_open()) {
-      errs() << "Filepath is uncorrect\n";
-      file.close();
-      return;
+  // outputs
+  for (auto i : outputPorts) {
+    std::string paramName = i.getName();
+    std::string paramType = i.getType();
+    std::string paramSize = i.getSize();
+    size_t outp = 0;
+    // find the size of array if the component's multidimensional
+    if (paramSize != "1") {
+      size_t k = 0;
+      for (auto &j : generics) {
+        if (j == paramSize) {
+          outp = std::stoi(modParameters[startInd + k]);
+          break;
+        }
+        ++k;
+      }
     }
-    file.close();
-    llvm::outs() << "---\n"
-                 << keyl << " "
-                 << "\npath: " << val.getPath()
-                 << "\nconcr_method: " << val.getConcretizationMethod()
-                 << "\nparameters:\n";
-    for (auto &i : val.getParameters()) {
-      llvm::outs() << "[" << i.getName() << "," << i.getType() << "]\n";
-    }
+    if (paramType == "dataflow") {
+      // have param, param_valid, param_ready
+      if (outp > 0) {
+        for (auto j = (size_t)0; j < outp; ++j) {
+          instance += paramName + "(" + std::to_string(j) + ") => " +
+                      numberedName + "_" + paramName + "_" + std::to_string(j) +
+                      ",\n";
+        }
+        for (auto j = (size_t)0; j < outp; ++j) {
+          instance += paramName + "_valid(" + std::to_string(j) + ") => " +
+                      numberedName + "_" + paramName + "_valid_" +
+                      std::to_string(j) + ",\n";
+        }
+        for (auto j = (size_t)0; j < outp; ++j) {
+          instance += paramName + "_ready(" + std::to_string(j) + ") => " +
+                      numberedName + "_" + paramName + "_ready_" +
+                      std::to_string(j) + ",\n";
+        }
+      } else {
+        instance += paramName + " => " + numberedName + "_" + paramName + "\n";
+        instance += paramName + "_valid => " + numberedName + "_" + paramName +
+                    "_valid,\n";
+        instance += paramName + "_ready => " + numberedName + "_" + paramName +
+                    "_ready,\n";
+      }
+    } else if (paramType == "control") {
+      // have only param_ready & param_valid
+      if (outp > 0) {
+        for (auto j = (size_t)0; j < outp; ++j) {
+          instance += paramName + "_valid(" + std::to_string(j) + ") => " +
+                      numberedName + "_" + paramName + "_valid_" +
+                      std::to_string(j) + ",\n";
+        }
+        for (auto j = (size_t)0; j < outp; ++j) {
+          instance += paramName + "_ready(" + std::to_string(j) + ") => " +
+                      numberedName + "_" + paramName + "_ready_" +
+                      std::to_string(j) + ",\n";
+        }
+      } else {
+        instance += paramName + "_valid => " + numberedName + "_" + paramName +
+                    "_valid,\n";
+        instance += paramName + "_ready => " + numberedName + "_" + paramName +
+                    "_ready,\n";
+      }
+    } else if (paramType == "signal") {
+      // only param, without valid & ready signals
+      if (outp > 0) {
+        for (auto j = (size_t)0; j < outp; ++j) {
+          instance += paramName + "(" + std::to_string(j) + ") => " +
+                      numberedName + "_" + paramName + "_" + std::to_string(j) +
+                      ",\n";
+        }
+      } else {
+        instance += paramName + " => " + numberedName + "_" + paramName + ",\n";
+      }
+    } else
+      // error
+      llvm::errs() << "Wrong output port's type\n";
   }
-}
-
-// Test how modules are printed on concretization phase
-void testModulesConcretization(mlir::OwningOpRef<mlir::ModuleOp> &module,
-                               VHDLComponentLibrary &m) {
-  StoreComponentNumbers comp{};
-  for (auto extModOp : module->getOps<hw::HWModuleExternOp>()) {
-    auto extName = extModOp.getModuleName();
-    llvm::outs() << "---\nOfficial module name: " << extName << "\n";
-    auto i = getMod(extModOp, m);
-
-    if (i.getModText().empty()) {
-      llvm::outs() << "Still doesn't exist in the lib\n";
-      continue;
-    } else {
-      llvm::outs() << "Mod_name: " << i.getModName() << "\n"
-                   << "Mod_text:\n"
-                   << i.getModText() << "\n"
-                   << "Path: " << i.getModDesc().getPath() << "\n";
-      llvm::outs() << "Concretization_method: "
-                   << i.getModDesc().getConcretizationMethod() << "\n"
-                   << "Parameters:\n";
-      for (auto &j : i.getModParameters()) {
-        llvm::outs() << j.getKey() << " " << j.getValue() << "\n";
-      }
-      llvm::outs() << "Inputs:\n";
-      for (auto &j : i.getInputPorts()) {
-        llvm::outs() << j << " ";
-      }
-      llvm::outs() << "\n";
-      llvm::outs() << "Outputs:\n";
-
-      for (auto &j : i.getOutputPorts()) {
-        llvm::outs() << j << " ";
-      }
-      llvm::outs() << "\n";
-
-      llvm::outs() << "Parameters of template:\n";
-      for (auto &j : i.getModDesc().getParameters()) {
-        llvm::outs() << "[" << j.getName() << ";" << j.getType() << "]\n";
-      }
-    }
+  if ((*(instance.end() - 1)) == '\n') {
+    (*(instance.end() - 2)) = ')';
+    (*(instance.end() - 1)) = ';';
   }
+  instance += "\n";
+  return instance;
 }
 
 // Test modules instantiation description
@@ -570,16 +638,27 @@ void testModulesInstantiation(mlir::OwningOpRef<mlir::ModuleOp> &module,
                               VHDLComponentLibrary &m) {
   StoreComponentNumbers comp{};
   for (auto extModOp : module->getOps<hw::HWModuleExternOp>()) {
-    llvm::outs() << "---------------\n";
-    auto i = getMod(extModOp, m);
+    auto extName = extModOp.getModuleName();
+    llvm::outs() << "# "
+                    "===-------------------------------------------------------"
+                    "---------------=== #\n";
+    auto i = getMod(extName, m);
 
     if (i.getModText().empty()) {
-      llvm::outs() << extModOp.getModuleName()
-                   << " still doesn't exist in the lib\n";
+      llvm::outs() << i.getModName() << " still doesn't exist in the lib\n";
+      llvm::outs()
+          << "# "
+             "===-------------------------------------------------------"
+             "---------------=== #\n";
       continue;
     } else {
+      llvm::outs() << i.getModName() << "\n";
+      llvm::outs()
+          << "# "
+             "===-------------------------------------------------------"
+             "---------------=== #\n";
       auto instance =
-          getEntityDeclaration(i, getModNumber(i.getModName(), comp));
+          getInstanceDeclaration(i, getModNumber(i.getModName(), comp));
       llvm::outs() << instance << "\n";
     }
   }
@@ -628,7 +707,6 @@ int main(int argc, char **argv) {
   // testLib(m);
   // testModulesConcretization(module, m);
 
-  // Instantiations go to standart llvm output
   testModulesInstantiation(module, m);
   return 0;
 }
