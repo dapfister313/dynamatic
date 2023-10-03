@@ -38,8 +38,10 @@ void dynamatic::buffer::setFPGA20Properties(Channel &channel) {
   // Channels connected to memory interfaces are not bufferizable
   if ((isa<handshake::MemoryControllerOp>(channel.producer)) ||
       isa<handshake::MemoryControllerOp>(channel.consumer)) {
-    channel.props->maxOpaque = 0;
+    channel.props->minTrans = 0;
     channel.props->maxTrans = 0;
+    channel.props->minOpaque = 0;
+    channel.props->maxOpaque = 0;
   }
 }
 

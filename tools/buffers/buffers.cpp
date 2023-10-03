@@ -21,6 +21,8 @@
 #include "dynamatic/Support/TimingModels.h"
 #include "dynamatic/Transforms/BufferPlacement/BufferingProperties.h"
 #include "dynamatic/Transforms/BufferPlacement/HandshakePlaceBuffers.h"
+#include "dynamatic/Transforms/BufferPlacement/HandshakeSetBufferingProperties.h"
+#include "dynamatic/Transforms/HandshakeCanonicalize.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -28,6 +30,7 @@
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Pass/PassManager.h"
+#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/SourceMgr.h"
@@ -119,7 +122,32 @@ static std::string strip(const std::string &str) {
       }
     }
   }
-  return str.substr(startIdx, endIdx - startIdx);
+  return leading ? "" : str.substr(startIdx, endIdx - startIdx);
+}
+
+/// Transforms the port number associated to an edge endpoint to match the
+/// operand ordering of legacy Dynamatic.
+static size_t fixPortNumber(Operation *op, size_t idx, bool isSrcOp) {
+  return llvm::TypeSwitch<Operation *, size_t>(op)
+      .Case<handshake::ConditionalBranchOp>([&](auto) {
+        if (isSrcOp)
+          return idx;
+        // Legacy Dynamatic has the data operand before the condition operand
+        return 1 - idx;
+      })
+      .Case<handshake::EndOp>([&](handshake::EndOp endOp) {
+        // Legacy Dynamatic has the memory controls before the return values
+        auto numReturnValues = endOp.getReturnValues().size();
+        auto numMemoryControls = endOp.getMemoryControls().size();
+        return (idx >= numReturnValues) ? idx - numMemoryControls
+                                        : idx + numReturnValues;
+      })
+      .Case<handshake::DynamaticLoadOp, handshake::DynamaticStoreOp>([&](auto) {
+        // Legacy Dynamatic has the data operand/result before the address
+        // operand/result
+        return 1 - idx;
+      })
+      .Default([&](auto) { return idx; });
 }
 
 static mlir::Value findChannel(ChannelInfo &info, NameToOp &names) {
@@ -133,25 +161,30 @@ static mlir::Value findChannel(ChannelInfo &info, NameToOp &names) {
     return nullptr;
   }
   Operation *srcOp = names[info.src], *dstOp = names[info.dst];
-  if (info.srcPort > srcOp->getNumResults()) {
+  size_t srcPortIdx = fixPortNumber(srcOp, info.srcPort - 1, true);
+  size_t dstPortIdx = fixPortNumber(dstOp, info.dstPort - 1, false);
+  if (srcPortIdx > srcOp->getNumResults()) {
     srcOp->emitError() << "Operation has " << srcOp->getNumResults()
                        << " results but source port is " << info.srcPort << "";
     return nullptr;
   }
-  if (info.dstPort > dstOp->getNumOperands()) {
+  if (dstPortIdx > dstOp->getNumOperands()) {
     dstOp->emitError() << "Operation has " << dstOp->getNumOperands()
                        << " operands but destination port is " << info.dstPort
                        << "";
     return nullptr;
   }
-  if (srcOp->getResult(info.srcPort) != dstOp->getOperand(info.dstPort)) {
-    llvm::errs() << "Port " << info.srcPort << " of " << info.src
-                 << " and port " << info.dstPort << " of " << info.dst
+  if (srcOp->getResult(srcPortIdx) != dstOp->getOperand(dstPortIdx)) {
+    llvm::errs() << "Port " << info.srcPort << " (" << srcPortIdx << ") of "
+                 << info.src << " and port " << info.dstPort << " ("
+                 << dstPortIdx << ") of " << info.dst
                  << " do not appear to match.\n";
+    srcOp->emitError() << "This is the source";
+    dstOp->emitError() << "This is the destination";
     return nullptr;
   }
 
-  return srcOp->getResult(info.srcPort);
+  return srcOp->getResult(srcPortIdx);
 }
 
 static LogicalResult annotateFunc(handshake::FuncOp funcOp) {
@@ -242,7 +275,7 @@ static LogicalResult annotateFunc(handshake::FuncOp funcOp) {
       return failure();
     }
 
-    // Find the value that the information indicates
+    // Find the value that is refered to by the line
     mlir::Value channel = findChannel(info, names);
     if (!channel)
       return failure();
@@ -303,18 +336,20 @@ int main(int argc, char **argv) {
 
   // Run the buffer placement pass
   PassManager pm(&context);
+  pm.addPass(dynamatic::buffer::createHandshakeSetBufferingProperties());
   pm.addPass(dynamatic::buffer::createHandshakePlaceBuffersPass(
       frequenciesFilepath, timingDBFilepath, false, targetCP, timeout, true));
+  pm.addPass(dynamatic::createHandshakeCanonicalize());
   if (failed(pm.run(modOp))) {
-    llvm::errs() << "Failed to run buffer placement\n.";
+    llvm::errs() << "Failed to run buffer placement.\n";
     return 1;
   }
 
   // Parse timing models for DOT printer
   TimingDatabase timingDB(&context);
   if (failed(TimingDatabase::readFromJSON(timingDBFilepath, timingDB))) {
-    llvm::errs() << "Failed to read timing database at \"" << timingDBFilepath
-                 << "\"\n";
+    llvm::errs() << "Failed to read timing database at '" << timingDBFilepath
+                 << "'.\n";
     return 1;
   }
   DOTPrinter printer(DOTPrinter::Mode::LEGACY, DOTPrinter::EdgeStyle::SPLINE,

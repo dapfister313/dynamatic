@@ -99,19 +99,21 @@ LogicalResult BufferPlacementMILP::setup() {
   if (failed(createVars()))
     return failure();
 
-  std::vector<Value> allChannels, allBufferizableChannels;
+  std::vector<Value> allChannels, nonMemChannels;
   for (auto &[channel, _] : channels) {
     allChannels.push_back(channel);
-    if (channels[channel].isBufferizable())
-      allBufferizableChannels.push_back(channel);
+    if (!isa_and_nonnull<handshake::MemoryControllerOp>(
+            channel.getDefiningOp()) &&
+        !isa<handshake::MemoryControllerOp>(*channel.getUsers().begin()))
+      nonMemChannels.push_back(channel);
   }
   std::vector<Operation *> allUnits;
   for (Operation &op : funcInfo.funcOp.getOps())
     allUnits.push_back(&op);
 
   if (failed(addCustomChannelConstraints(allChannels)) ||
-      failed(addPathConstraints(allBufferizableChannels, allUnits)) ||
-      failed(addElasticityConstraints(allBufferizableChannels, allUnits)))
+      failed(addPathConstraints(nonMemChannels, allUnits)) ||
+      failed(addElasticityConstraints(nonMemChannels, allUnits)))
     return failure();
 
   // Add throughput constraints over each CFDFC that was marked to be optimized
@@ -347,8 +349,10 @@ BufferPlacementMILP::addPathConstraints(ValueRange pathChannels,
     // Arrival time at channel's output must be lower than target clock period
     model.addConstr(t2 <= targetPeriod, "path_channelOutPeriod");
     // If there isn't an opaque buffer on the channel, arrival time at channel's
-    // output must be greater than at channel's input
-    model.addConstr(t2 >= t1 - maxPeriod * chVars.bufIsOpaque,
+    // output must be greater than at channel's input. We also need to account
+    // for any channel delay
+    double delay = channels[channel].delay;
+    model.addConstr(t2 >= t1 + delay - maxPeriod * chVars.bufIsOpaque,
                     "path_opaqueChannel");
   }
 

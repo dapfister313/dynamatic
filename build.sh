@@ -307,6 +307,7 @@ create_symlink build/bin/dynamatic-opt
 create_symlink build/bin/export-dot
 create_symlink build/bin/exp-frequency-profiler
 create_symlink build/bin/handshake-simulator
+create_symlink build/bin/buffers
 
 # Make the scripts used by the frontend executable
 chmod +x tools/dynamatic/scripts/synthesize.sh
