@@ -310,8 +310,7 @@ int main(int argc, char **argv) {
   // Functions feeding into HLS tools might have attributes from high(er) level
   // dialects or parsers. Allow unregistered dialects to not fail in these cases
   MLIRContext context;
-  context.loadDialect<func::FuncDialect, memref::MemRefDialect,
-                      arith::ArithDialect, LLVM::LLVMDialect,
+  context.loadDialect<memref::MemRefDialect, arith::ArithDialect,
                       handshake::HandshakeDialect>();
   context.allowUnregisteredDialects();
 
@@ -323,6 +322,8 @@ int main(int argc, char **argv) {
   if (!module)
     return 1;
   mlir::ModuleOp modOp = *module;
+
+  // Extract the single function from the module
   auto funcs = modOp.getOps<handshake::FuncOp>();
   if (std::distance(funcs.begin(), funcs.end()) != 1) {
     modOp->emitError() << "We only support one Handshake function per module";

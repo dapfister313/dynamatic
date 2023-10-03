@@ -30,7 +30,7 @@ namespace dynamatic {
 #include "dynamatic/Transforms/Passes.h.inc"
 
 std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
-createHandshakeCanonicalize();
+createHandshakeCanonicalize(bool justBranches = false);
 
 } // namespace dynamatic
 

@@ -87,6 +87,9 @@ def HandshakeCanonicalize : Pass<"handshake-canonicalize", "mlir::ModuleOp"> {
     made to the IR.
   }];
   let constructor = "dynamatic::createHandshakeCanonicalize()";
+  let options =
+  [Option<"justBranches", "just-branches", "bool", "false",
+          "Just remove unconditional branches (for Louis!)">];
 }
 
 def HandshakeInferBasicBlocks : Pass<"handshake-infer-basic-blocks", "mlir::ModuleOp"> {
