@@ -29,8 +29,12 @@
 
 #ifndef DYNAMATIC_GUROBI_NOT_INSTALLED
 #include "gurobi_c++.h"
+
 namespace dynamatic {
 namespace buffer {
+
+using PathConstraints = mlir::SmallVector<
+    std::pair<mlir::SmallVector<mlir::Value>, dynamatic::ChannelBufProps>>;
 
 /// Holds information about what type of buffer should be placed on a specific
 /// channel.
@@ -134,8 +138,8 @@ public:
   /// Constructs the buffer placement MILP. All arguments passed by reference
   /// must outlive the created instance, which maintains reference internally.
   BufferPlacementMILP(FuncInfo &funcInfo, const TimingDatabase &timingDB,
-                      double targetPeriod, double maxPeriod, GRBEnv &env,
-                      Logger *log = nullptr);
+                      const std::string &constraints, double targetPeriod,
+                      double maxPeriod, GRBEnv &env, Logger *log = nullptr);
 
   /// Returns whether the custom buffer placement constraints derived from
   /// custom channel buffering properties attached to IR operations are
@@ -178,6 +182,8 @@ protected:
   DenseMap<Operation *, std::string> nameUniquer;
   /// Logger; if not null the class will log setup and results information.
   Logger *logger;
+  /// Extra constraints (for Louis)
+  PathConstraints pathConstraints;
 
   /// Adds all variables used in the MILP to the Gurobi model.
   LogicalResult createVars();

@@ -211,7 +211,10 @@ def HandshakePlaceBuffers : Pass<"handshake-place-buffers", "mlir::ModuleOp"> {
     Option<"dumpLogs", "dump-logs", "bool", "false",
     "If true, dump debugging information (identified CFDFCs, MILP "
     "placement decisions, solution summaries) into a directory named "
-    "'buffer-placement' at the binary's location.">];
+    "'buffer-placement' at the binary's location.">,
+    Option<"constraints", "constraints", "std::string", "",
+    "Extra constraints (for Louis)">,
+    ];
 }
 
 //===----------------------------------------------------------------------===//

@@ -19,6 +19,7 @@
 #include "circt/Dialect/Handshake/HandshakeOps.h"
 #include "dynamatic/Support/DOTPrinter.h"
 #include "dynamatic/Support/TimingModels.h"
+#include "dynamatic/Transforms/BufferPlacement/BufferPlacementMILP.h"
 #include "dynamatic/Transforms/BufferPlacement/BufferingProperties.h"
 #include "dynamatic/Transforms/BufferPlacement/HandshakePlaceBuffers.h"
 #include "dynamatic/Transforms/BufferPlacement/HandshakeSetBufferingProperties.h"
@@ -83,297 +84,6 @@ static cl::opt<double> timeout("timeout", cl::Optional,
                                cl::desc("Gurobi timeout, in s"), cl::init(180),
                                cl::cat(mainCategory));
 
-namespace {
-
-using NameToOp = std::unordered_map<std::string, Operation *>;
-using OpToName = std::unordered_map<Operation *, std::string>;
-
-using PathConstraints =
-    SmallVector<std::pair<SmallVector<Operation *>, ChannelBufProps>>;
-
-struct ChannelInfo {
-  std::string src;
-  unsigned srcPort;
-  std::string dst;
-  unsigned dstPort;
-  double delay;
-  unsigned minTrans;
-  std::optional<unsigned> maxTrans;
-  unsigned minOpaque;
-  std::optional<unsigned> maxOpaque;
-};
-} // namespace
-
-// Ugly but who cares.
-NameToOp names;
-OpToName ops;
-
-/// Determines whether a string is a valid unsigned integer.
-static bool isUnsigned(const std::string &str) {
-  return std::all_of(str.begin(), str.end(), [](char c) { return isdigit(c); });
-}
-
-static bool isDouble(const std::string &str) {
-  return std::all_of(str.begin(), str.end(),
-                     [](char c) { return isdigit(c) || c == '.'; });
-}
-
-static std::string strip(const std::string &str) {
-  unsigned startIdx = 0, endIdx = str.size();
-  bool leading = true;
-  for (auto [idx, c] : llvm::enumerate(str)) {
-    if (leading) {
-      if (!std::isspace(c)) {
-        leading = false;
-        startIdx = idx;
-      }
-    } else {
-      if (std::isspace(c)) {
-        endIdx = idx;
-        break;
-      }
-    }
-  }
-  return leading ? "" : str.substr(startIdx, endIdx - startIdx);
-}
-
-/// Kinda DFS path finding.
-static bool findPath(Operation *src, Operation *dst,
-                     SmallVector<Operation *> &path) {
-  path.push_back(src);
-  if (src == dst)
-    return true;
-  for (OpResult res : src->getResults()) {
-    Operation *user = *res.getUsers().begin();
-    // Have we found the destination
-    if (user == dst) {
-      path.push_back(dst);
-      return true;
-    }
-    // Detect loops
-    if (llvm::any_of(path, [&](Operation *op) { return op == user; }))
-      return false;
-    SmallVector<Operation *> newPath;
-    llvm::copy(path, std::back_inserter(newPath));
-    if (findPath(user, dst, newPath)) {
-      path = newPath;
-      return true;
-    }
-  }
-  return false;
-}
-
-static bool findPath(mlir::Value src, mlir::Value dst,
-                     SmallVector<Operation *> &path) {
-  path.push_back(src.getDefiningOp());
-  if (findPath(*src.getUsers().begin(), dst.getDefiningOp(), path)) {
-    path.push_back(*dst.getUsers().begin());
-    return true;
-  }
-  return false;
-}
-
-/// Transforms the port number associated to an edge endpoint to match the
-/// operand ordering of legacy Dynamatic.
-static size_t fixPortNumber(Operation *op, size_t idx, bool isSrcOp) {
-  return llvm::TypeSwitch<Operation *, size_t>(op)
-      .Case<handshake::ConditionalBranchOp>([&](auto) {
-        if (isSrcOp)
-          return idx;
-        // Legacy Dynamatic has the data operand before the condition operand
-        return 1 - idx;
-      })
-      .Case<handshake::EndOp>([&](handshake::EndOp endOp) {
-        // Legacy Dynamatic has the memory controls before the return values
-        auto numReturnValues = endOp.getReturnValues().size();
-        auto numMemoryControls = endOp.getMemoryControls().size();
-        return (idx < numMemoryControls) ? idx + numReturnValues
-                                         : idx - numMemoryControls;
-      })
-      .Case<handshake::DynamaticLoadOp, handshake::DynamaticStoreOp>([&](auto) {
-        // Legacy Dynamatic has the data operand/result before the address
-        // operand/result
-        return 1 - idx;
-      })
-      .Default([&](auto) { return idx; });
-}
-
-static bool channelCanExist(ChannelInfo &info) {
-  // Identify the channel referenced by the information
-  if (names.find(info.src) == names.end()) {
-    llvm::errs() << "No operation named " << info.src << " could be found\n";
-    return false;
-  }
-  if (names.find(info.dst) == names.end()) {
-    llvm::errs() << "No operation named " << info.dst << " could be found\n";
-    return false;
-  }
-  Operation *srcOp = names[info.src], *dstOp = names[info.dst];
-  size_t srcPortIdx = fixPortNumber(srcOp, info.srcPort - 1, true);
-  size_t dstPortIdx = fixPortNumber(dstOp, info.dstPort - 1, false);
-  if (srcPortIdx > srcOp->getNumResults()) {
-    llvm::errs() << "Operation " << info.src << " has "
-                 << srcOp->getNumResults() << " results but source port is "
-                 << srcPortIdx << "";
-    return false;
-  }
-  if (dstPortIdx > dstOp->getNumOperands()) {
-    llvm::errs() << "Operation " << info.src << " has "
-                 << dstOp->getNumOperands()
-                 << " operands but destination port is " << dstPortIdx << "";
-    return false;
-  }
-  return true;
-}
-
-static bool findChannel(ChannelInfo &info, mlir::Value &channel) {
-  Operation *srcOp = names[info.src], *dstOp = names[info.dst];
-  size_t srcPortIdx = fixPortNumber(srcOp, info.srcPort - 1, true);
-  size_t dstPortIdx = fixPortNumber(dstOp, info.dstPort - 1, false);
-  if (srcOp->getResult(srcPortIdx) != dstOp->getOperand(dstPortIdx)) {
-    // llvm::errs() << "Port " << info.srcPort << " (" << srcPortIdx << ") of "
-    //              << info.src << " and port " << info.dstPort << " ("
-    //              << dstPortIdx << ") of " << info.dst
-    //              << " do not appear to match.\n";
-    return false;
-  }
-
-  channel = srcOp->getResult(srcPortIdx);
-  return true;
-}
-
-static LogicalResult annotateFunc(handshake::FuncOp funcOp,
-                                  PathConstraints &paths) {
-  // Re-derive operation names in the same way as the DOT does
-  std::map<std::string, unsigned> opTypeCntrs;
-  for (auto &op : funcOp.getOps()) {
-    std::string opFullName = op.getName().getStringRef().str();
-    auto startIdx = opFullName.find('.');
-    if (startIdx == std::string::npos)
-      startIdx = 0;
-    unsigned id;
-    if (auto memOp = dyn_cast<handshake::MemoryControllerOp>(op))
-      // Memories already have unique IDs, so make their name match it
-      id = memOp.getId();
-    else
-      id = opTypeCntrs[op.getName().getStringRef().str()]++;
-    std::string fullName = opFullName.substr(startIdx + 1) + std::to_string(id);
-    names[fullName] = &op;
-    ops[&op] = fullName;
-  }
-
-  // Open the buffer information file
-  std::ifstream inputFile(bufferInfoFilepath);
-  if (!inputFile.is_open()) {
-    llvm::errs() << "Failed to open buffer information\n";
-    return failure();
-  }
-
-  std::string token;
-
-  auto parseDouble = [&](std::istringstream &iss,
-                         double &value) -> ParseResult {
-    std::getline(iss, token, ',');
-    token = strip(token);
-    if (!isDouble(token))
-      return failure();
-    value = std::stod(token);
-    return success();
-  };
-
-  auto parseUnsigned = [&](std::istringstream &iss,
-                           unsigned &value) -> ParseResult {
-    std::getline(iss, token, ',');
-    token = strip(token);
-    if (!isUnsigned(token))
-      return failure();
-    value = std::stoi(token);
-    return success();
-  };
-
-  auto parseOptUnsigned = [&](std::istringstream &iss,
-                              std::optional<unsigned> &value) -> ParseResult {
-    std::getline(iss, token, ',');
-    token = strip(token);
-    if (token.empty()) {
-      value = std::nullopt;
-      return success();
-    }
-    if (!isUnsigned(token))
-      return failure();
-    value = std::stoi(token);
-    return success();
-  };
-
-  auto parseString = [&](std::istringstream &iss,
-                         std::string &value) -> ParseResult {
-    std::getline(iss, token, ',');
-    value = strip(token);
-    return success();
-  };
-
-  // Skip the header line
-  std::string line;
-  std::getline(inputFile, line);
-
-  // Parse lines one by one, creating an ArchBB for each
-  size_t idx = 1;
-  while (std::getline(inputFile, line)) {
-    std::istringstream iss(line);
-
-    // Parse all columns
-    ChannelInfo info;
-    if (parseString(iss, info.src) || parseUnsigned(iss, info.srcPort) ||
-        parseString(iss, info.dst) || parseUnsigned(iss, info.dstPort) ||
-        parseDouble(iss, info.delay) || parseUnsigned(iss, info.minTrans) ||
-        parseOptUnsigned(iss, info.maxTrans) ||
-        parseUnsigned(iss, info.minOpaque) ||
-        parseOptUnsigned(iss, info.maxOpaque)) {
-      llvm::errs() << "Failed to parse constraint on line " << idx << "\n"
-                   << line << "\n";
-      return failure();
-    }
-
-    if (!channelCanExist(info))
-      return failure();
-
-    ChannelBufProps props(info.minTrans, info.maxTrans, info.minOpaque,
-                          info.maxOpaque, info.delay);
-
-    // Try to find the value that is refered to by the line
-    mlir::Value channel;
-    if (findChannel(info, channel)) {
-      llvm::errs() << "[INFO] Identified constraint on line " << idx
-                   << " as directly connected channel"
-                   << "\n";
-
-      // Set buffering properties for the channel
-      if (failed(dynamatic::buffer::replaceBufProps(channel, props)))
-        return failure();
-    } else {
-      // Failing that, try to find a path between source and destination
-      SmallVector<Operation *> path;
-      Operation *srcOp = names[info.src], *dstOp = names[info.dst];
-      size_t srcPortIdx = fixPortNumber(srcOp, info.srcPort - 1, true);
-      size_t dstPortIdx = fixPortNumber(dstOp, info.dstPort - 1, false);
-      if (!findPath(srcOp->getResult(srcPortIdx), dstOp->getOperand(dstPortIdx),
-                    path)) {
-        llvm::errs()
-            << "Failed to find channel or path corresponding to input.\n";
-        return failure();
-      }
-      paths.push_back(std::make_pair(path, props));
-      llvm::errs() << "[INFO] Identified constraint on line " << idx
-                   << " as path:";
-      for (Operation *opOnPath : path)
-        llvm::errs() << ops[opOnPath] << " -> ";
-      llvm::errs() << "\n";
-    }
-    idx++;
-  }
-  return success();
-}
-
 int main(int argc, char **argv) {
   InitLLVM y(argc, argv);
 
@@ -414,18 +124,18 @@ int main(int argc, char **argv) {
     modOp->emitError() << "We only support one Handshake function per module";
     return 1;
   }
-  handshake::FuncOp funcOp = *funcs.begin();
-  PathConstraints paths;
-  if (failed(annotateFunc(funcOp, paths))) {
-    funcOp->emitError() << "Failed to annotate function";
-    return 1;
-  }
+  // handshake::FuncOp funcOp = *funcs.begin();
+  // if (failed(annotateFunc(funcOp))) {
+  //   funcOp->emitError() << "Failed to annotate function";
+  //   return 1;
+  // }
 
   // Run the buffer placement pass
   PassManager pm(&context);
   pm.addPass(dynamatic::buffer::createHandshakeSetBufferingProperties());
   pm.addPass(dynamatic::buffer::createHandshakePlaceBuffersPass(
-      frequenciesFilepath, timingDBFilepath, false, targetCP, timeout, true));
+      frequenciesFilepath, timingDBFilepath, false, targetCP, timeout, true,
+      bufferInfoFilepath));
   pm.addPass(dynamatic::createHandshakeCanonicalize());
   if (failed(pm.run(modOp))) {
     llvm::errs() << "Failed to run buffer placement.\n";

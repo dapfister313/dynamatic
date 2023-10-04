@@ -26,7 +26,8 @@ std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
 createHandshakePlaceBuffersPass(const std::string &frequencies = "",
                                 const std::string &timingModels = "",
                                 bool firstCFDFC = false, double targetCP = 4.0,
-                                unsigned timeout = 180, bool dumpLogs = false);
+                                unsigned timeout = 180, bool dumpLogs = false,
+                                const std::string &constraints = "");
 
 } // namespace buffer
 } // namespace dynamatic

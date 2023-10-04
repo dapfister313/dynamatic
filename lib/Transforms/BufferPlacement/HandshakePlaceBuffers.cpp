@@ -171,13 +171,15 @@ struct HandshakePlaceBuffersPass
 
   HandshakePlaceBuffersPass(const std::string &frequencies,
                             const std::string &timingModels, bool firstCFDFC,
-                            double targetCP, unsigned timeout, bool dumpLogs) {
+                            double targetCP, unsigned timeout, bool dumpLogs,
+                            const std::string &constraints) {
     this->frequencies = frequencies;
     this->timingModels = timingModels;
     this->firstCFDFC = firstCFDFC;
     this->targetCP = targetCP;
     this->timeout = timeout;
     this->dumpLogs = dumpLogs;
+    this->constraints = constraints;
   }
 
 #ifdef DYNAMATIC_GUROBI_NOT_INSTALLED
@@ -339,8 +341,8 @@ LogicalResult HandshakePlaceBuffersPass::getBufferPlacement(
   Logger *milpLog = dumpLogs ? *log : nullptr;
 
   // Create and solve the MILP
-  BufferPlacementMILP milp(info, timingDB, targetCP, targetCP * 2.0, env,
-                           milpLog);
+  BufferPlacementMILP milp(info, timingDB, constraints, targetCP,
+                           targetCP * 2.0, env, milpLog);
   return success(milp.arePlacementConstraintsSatisfiable() &&
                  !failed(milp.setup()) && !failed(milp.optimize(placement)));
 }
@@ -380,7 +382,9 @@ LogicalResult HandshakePlaceBuffersPass::instantiateBuffers(
 std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
 dynamatic::buffer::createHandshakePlaceBuffersPass(
     const std::string &frequencies, const std::string &timingModels,
-    bool firstCFDFC, double targetCP, unsigned timeout, bool dumpLogs) {
+    bool firstCFDFC, double targetCP, unsigned timeout, bool dumpLogs,
+    const std::string &constraints) {
   return std::make_unique<HandshakePlaceBuffersPass>(
-      frequencies, timingModels, firstCFDFC, targetCP, timeout, dumpLogs);
+      frequencies, timingModels, firstCFDFC, targetCP, timeout, dumpLogs,
+      constraints);
 }
