@@ -139,8 +139,8 @@ static size_t fixPortNumber(Operation *op, size_t idx, bool isSrcOp) {
         // Legacy Dynamatic has the memory controls before the return values
         auto numReturnValues = endOp.getReturnValues().size();
         auto numMemoryControls = endOp.getMemoryControls().size();
-        return (idx >= numReturnValues) ? idx - numMemoryControls
-                                        : idx + numReturnValues;
+        return (idx < numMemoryControls) ? idx + numReturnValues
+                                         : idx - numMemoryControls;
       })
       .Case<handshake::DynamaticLoadOp, handshake::DynamaticStoreOp>([&](auto) {
         // Legacy Dynamatic has the data operand/result before the address
@@ -165,12 +165,12 @@ static mlir::Value findChannel(ChannelInfo &info, NameToOp &names) {
   size_t dstPortIdx = fixPortNumber(dstOp, info.dstPort - 1, false);
   if (srcPortIdx > srcOp->getNumResults()) {
     srcOp->emitError() << "Operation has " << srcOp->getNumResults()
-                       << " results but source port is " << info.srcPort << "";
+                       << " results but source port is " << srcPortIdx << "";
     return nullptr;
   }
   if (dstPortIdx > dstOp->getNumOperands()) {
     dstOp->emitError() << "Operation has " << dstOp->getNumOperands()
-                       << " operands but destination port is " << info.dstPort
+                       << " operands but destination port is " << dstPortIdx
                        << "";
     return nullptr;
   }
