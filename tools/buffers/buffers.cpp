@@ -28,14 +28,18 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Support/LogicalResult.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/SourceMgr.h"
 #include <cctype>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <unordered_map>
 
@@ -82,6 +86,10 @@ static cl::opt<double> timeout("timeout", cl::Optional,
 namespace {
 
 using NameToOp = std::unordered_map<std::string, Operation *>;
+using OpToName = std::unordered_map<Operation *, std::string>;
+
+using PathConstraints =
+    SmallVector<std::pair<SmallVector<Operation *>, ChannelBufProps>>;
 
 struct ChannelInfo {
   std::string src;
@@ -95,6 +103,10 @@ struct ChannelInfo {
   std::optional<unsigned> maxOpaque;
 };
 } // namespace
+
+// Ugly but who cares.
+NameToOp names;
+OpToName ops;
 
 /// Determines whether a string is a valid unsigned integer.
 static bool isUnsigned(const std::string &str) {
@@ -125,6 +137,42 @@ static std::string strip(const std::string &str) {
   return leading ? "" : str.substr(startIdx, endIdx - startIdx);
 }
 
+/// Kinda DFS path finding.
+static bool findPath(Operation *src, Operation *dst,
+                     SmallVector<Operation *> &path) {
+  path.push_back(src);
+  if (src == dst)
+    return true;
+  for (OpResult res : src->getResults()) {
+    Operation *user = *res.getUsers().begin();
+    // Have we found the destination
+    if (user == dst) {
+      path.push_back(dst);
+      return true;
+    }
+    // Detect loops
+    if (llvm::any_of(path, [&](Operation *op) { return op == user; }))
+      return false;
+    SmallVector<Operation *> newPath;
+    llvm::copy(path, std::back_inserter(newPath));
+    if (findPath(user, dst, newPath)) {
+      path = newPath;
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool findPath(mlir::Value src, mlir::Value dst,
+                     SmallVector<Operation *> &path) {
+  path.push_back(src.getDefiningOp());
+  if (findPath(*src.getUsers().begin(), dst.getDefiningOp(), path)) {
+    path.push_back(*dst.getUsers().begin());
+    return true;
+  }
+  return false;
+}
+
 /// Transforms the port number associated to an edge endpoint to match the
 /// operand ordering of legacy Dynamatic.
 static size_t fixPortNumber(Operation *op, size_t idx, bool isSrcOp) {
@@ -150,47 +198,54 @@ static size_t fixPortNumber(Operation *op, size_t idx, bool isSrcOp) {
       .Default([&](auto) { return idx; });
 }
 
-static mlir::Value findChannel(ChannelInfo &info, NameToOp &names) {
+static bool channelCanExist(ChannelInfo &info) {
   // Identify the channel referenced by the information
   if (names.find(info.src) == names.end()) {
     llvm::errs() << "No operation named " << info.src << " could be found\n";
-    return nullptr;
+    return false;
   }
   if (names.find(info.dst) == names.end()) {
     llvm::errs() << "No operation named " << info.dst << " could be found\n";
-    return nullptr;
+    return false;
   }
   Operation *srcOp = names[info.src], *dstOp = names[info.dst];
   size_t srcPortIdx = fixPortNumber(srcOp, info.srcPort - 1, true);
   size_t dstPortIdx = fixPortNumber(dstOp, info.dstPort - 1, false);
   if (srcPortIdx > srcOp->getNumResults()) {
-    srcOp->emitError() << "Operation has " << srcOp->getNumResults()
-                       << " results but source port is " << srcPortIdx << "";
-    return nullptr;
+    llvm::errs() << "Operation " << info.src << " has "
+                 << srcOp->getNumResults() << " results but source port is "
+                 << srcPortIdx << "";
+    return false;
   }
   if (dstPortIdx > dstOp->getNumOperands()) {
-    dstOp->emitError() << "Operation has " << dstOp->getNumOperands()
-                       << " operands but destination port is " << dstPortIdx
-                       << "";
-    return nullptr;
+    llvm::errs() << "Operation " << info.src << " has "
+                 << dstOp->getNumOperands()
+                 << " operands but destination port is " << dstPortIdx << "";
+    return false;
   }
-  if (srcOp->getResult(srcPortIdx) != dstOp->getOperand(dstPortIdx)) {
-    llvm::errs() << "Port " << info.srcPort << " (" << srcPortIdx << ") of "
-                 << info.src << " and port " << info.dstPort << " ("
-                 << dstPortIdx << ") of " << info.dst
-                 << " do not appear to match.\n";
-    srcOp->emitError() << "This is the source";
-    dstOp->emitError() << "This is the destination";
-    return nullptr;
-  }
-
-  return srcOp->getResult(srcPortIdx);
+  return true;
 }
 
-static LogicalResult annotateFunc(handshake::FuncOp funcOp) {
+static bool findChannel(ChannelInfo &info, mlir::Value &channel) {
+  Operation *srcOp = names[info.src], *dstOp = names[info.dst];
+  size_t srcPortIdx = fixPortNumber(srcOp, info.srcPort - 1, true);
+  size_t dstPortIdx = fixPortNumber(dstOp, info.dstPort - 1, false);
+  if (srcOp->getResult(srcPortIdx) != dstOp->getOperand(dstPortIdx)) {
+    // llvm::errs() << "Port " << info.srcPort << " (" << srcPortIdx << ") of "
+    //              << info.src << " and port " << info.dstPort << " ("
+    //              << dstPortIdx << ") of " << info.dst
+    //              << " do not appear to match.\n";
+    return false;
+  }
+
+  channel = srcOp->getResult(srcPortIdx);
+  return true;
+}
+
+static LogicalResult annotateFunc(handshake::FuncOp funcOp,
+                                  PathConstraints &paths) {
   // Re-derive operation names in the same way as the DOT does
   std::map<std::string, unsigned> opTypeCntrs;
-  NameToOp names;
   for (auto &op : funcOp.getOps()) {
     std::string opFullName = op.getName().getStringRef().str();
     auto startIdx = opFullName.find('.');
@@ -202,7 +257,9 @@ static LogicalResult annotateFunc(handshake::FuncOp funcOp) {
       id = memOp.getId();
     else
       id = opTypeCntrs[op.getName().getStringRef().str()]++;
-    names[opFullName.substr(startIdx + 1) + std::to_string(id)] = &op;
+    std::string fullName = opFullName.substr(startIdx + 1) + std::to_string(id);
+    names[fullName] = &op;
+    ops[&op] = fullName;
   }
 
   // Open the buffer information file
@@ -260,6 +317,7 @@ static LogicalResult annotateFunc(handshake::FuncOp funcOp) {
   std::getline(inputFile, line);
 
   // Parse lines one by one, creating an ArchBB for each
+  size_t idx = 1;
   while (std::getline(inputFile, line)) {
     std::istringstream iss(line);
 
@@ -271,20 +329,47 @@ static LogicalResult annotateFunc(handshake::FuncOp funcOp) {
         parseOptUnsigned(iss, info.maxTrans) ||
         parseUnsigned(iss, info.minOpaque) ||
         parseOptUnsigned(iss, info.maxOpaque)) {
-      llvm::errs() << "Failed to parse CSV line: " << line << "\n";
+      llvm::errs() << "Failed to parse constraint on line " << idx << "\n"
+                   << line << "\n";
       return failure();
     }
 
-    // Find the value that is refered to by the line
-    mlir::Value channel = findChannel(info, names);
-    if (!channel)
+    if (!channelCanExist(info))
       return failure();
 
-    // Set buffering properties for the channel
     ChannelBufProps props(info.minTrans, info.maxTrans, info.minOpaque,
                           info.maxOpaque, info.delay);
-    if (failed(dynamatic::buffer::replaceBufProps(channel, props)))
-      return failure();
+
+    // Try to find the value that is refered to by the line
+    mlir::Value channel;
+    if (findChannel(info, channel)) {
+      llvm::errs() << "[INFO] Identified constraint on line " << idx
+                   << " as directly connected channel"
+                   << "\n";
+
+      // Set buffering properties for the channel
+      if (failed(dynamatic::buffer::replaceBufProps(channel, props)))
+        return failure();
+    } else {
+      // Failing that, try to find a path between source and destination
+      SmallVector<Operation *> path;
+      Operation *srcOp = names[info.src], *dstOp = names[info.dst];
+      size_t srcPortIdx = fixPortNumber(srcOp, info.srcPort - 1, true);
+      size_t dstPortIdx = fixPortNumber(dstOp, info.dstPort - 1, false);
+      if (!findPath(srcOp->getResult(srcPortIdx), dstOp->getOperand(dstPortIdx),
+                    path)) {
+        llvm::errs()
+            << "Failed to find channel or path corresponding to input.\n";
+        return failure();
+      }
+      paths.push_back(std::make_pair(path, props));
+      llvm::errs() << "[INFO] Identified constraint on line " << idx
+                   << " as path:";
+      for (Operation *opOnPath : path)
+        llvm::errs() << ops[opOnPath] << " -> ";
+      llvm::errs() << "\n";
+    }
+    idx++;
   }
   return success();
 }
@@ -330,7 +415,8 @@ int main(int argc, char **argv) {
     return 1;
   }
   handshake::FuncOp funcOp = *funcs.begin();
-  if (failed(annotateFunc(funcOp))) {
+  PathConstraints paths;
+  if (failed(annotateFunc(funcOp, paths))) {
     funcOp->emitError() << "Failed to annotate function";
     return 1;
   }
