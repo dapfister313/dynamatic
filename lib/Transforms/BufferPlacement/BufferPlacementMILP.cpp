@@ -310,6 +310,7 @@ static LogicalResult annotateFunc(handshake::FuncOp funcOp,
   // Parse lines one by one, creating an ArchBB for each
   size_t idx = 1;
   while (std::getline(inputFile, line)) {
+    idx++;
     std::istringstream iss(line);
 
     // Parse all columns
@@ -373,8 +374,9 @@ static LogicalResult annotateFunc(handshake::FuncOp funcOp,
       size_t dstPortIdx = fixPortNumber(dstOp, info.dstPort - 1, false);
       if (!findPath(srcOp->getResult(srcPortIdx), dstOp->getOperand(dstPortIdx),
                     path)) {
-        llvm::errs()
-            << "Failed to find channel or path corresponding to input.\n";
+        llvm::errs() << "Failed to find channel or path corresponding to "
+                        "constraint on line "
+                     << idx << "\n";
         return failure();
       }
       pathConstraints.push_back(std::make_pair(path, props));
@@ -384,7 +386,6 @@ static LogicalResult annotateFunc(handshake::FuncOp funcOp,
         llvm::errs() << " -> " << ops[*val.getUsers().begin()];
       llvm::errs() << "\n";
     }
-    idx++;
   }
   return success();
 }
