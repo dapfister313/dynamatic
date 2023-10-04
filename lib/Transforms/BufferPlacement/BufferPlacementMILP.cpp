@@ -240,6 +240,10 @@ static LogicalResult annotateFunc(handshake::FuncOp funcOp,
                            unsigned &value) -> ParseResult {
     std::getline(iss, token, ',');
     token = strip(token);
+    if (token.empty()) {
+      value = 0;
+      return success();
+    }
     if (!isUnsigned(token))
       return failure();
     value = std::stoi(token);
@@ -267,6 +271,38 @@ static LogicalResult annotateFunc(handshake::FuncOp funcOp,
     return success();
   };
 
+  auto mergeProps = [&](Channel &channel,
+                        ChannelBufProps &newProps) -> LogicalResult {
+    ChannelBufProps &oldProps = *channel.props;
+
+    std::optional<unsigned> maxTrans;
+    if (!oldProps.maxTrans.has_value())
+      maxTrans = newProps.maxTrans;
+    else if (!newProps.maxTrans.has_value())
+      maxTrans = oldProps.maxTrans;
+    else
+      maxTrans = std::min(*oldProps.maxTrans, *newProps.maxTrans);
+
+    std::optional<unsigned> maxOpaque;
+    if (!oldProps.maxOpaque.has_value())
+      maxOpaque = newProps.maxOpaque;
+    else if (!newProps.maxOpaque.has_value())
+      maxOpaque = oldProps.maxOpaque;
+    else
+      maxOpaque = std::min(*oldProps.maxOpaque, *newProps.maxOpaque);
+
+    unsigned minTrans = std::max(oldProps.minTrans, newProps.minTrans);
+    if (maxTrans.has_value() && minTrans > *maxTrans)
+      minTrans = *maxTrans;
+
+    unsigned minOpaque = std::max(oldProps.minOpaque, newProps.minOpaque);
+    if (maxOpaque.has_value() && minOpaque > *maxOpaque)
+      minOpaque = *maxOpaque;
+
+    ChannelBufProps combined(minTrans, maxTrans, minOpaque, maxOpaque);
+    return dynamatic::buffer::replaceBufProps(channel.value, combined);
+  };
+
   // Skip the header line
   std::string line;
   std::getline(inputFile, line);
@@ -289,11 +325,35 @@ static LogicalResult annotateFunc(handshake::FuncOp funcOp,
       return failure();
     }
 
-    if (!channelCanExist(info))
-      return failure();
-
     ChannelBufProps props(info.minTrans, info.maxTrans, info.minOpaque,
                           info.maxOpaque, info.delay);
+
+    // If no source and destination components are provided, interpret the
+    // constraints as global
+    if (info.src.empty() && info.dst.empty()) {
+      for (BlockArgument arg : funcOp.getArguments())
+        for (Operation *user : arg.getUsers()) {
+          Channel channel(arg, *funcOp, *user, true);
+          if (failed(mergeProps(channel, props))) {
+            llvm::errs() << "Failed to impose global channel constraint.\n";
+            return failure();
+          }
+        }
+
+      for (Operation &op : funcOp.getOps())
+        for (OpResult res : op.getResults())
+          for (Operation *user : res.getUsers()) {
+            Channel channel(res, op, *user, true);
+            if (failed(mergeProps(channel, props))) {
+              llvm::errs() << "Failed to impose global channel constraint.\n";
+              return failure();
+            }
+          }
+      continue;
+    }
+
+    if (!channelCanExist(info))
+      return failure();
 
     // Try to find the value that is refered to by the line
     mlir::Value channel;
@@ -465,26 +525,33 @@ BufferPlacementMILP::optimize(DenseMap<Value, PlacementResult> &placement) {
       /// NOTE: This matches the behavior of the legacy buffer placement pass
       /// However, a better placement may be achieved using the commented out
       /// logic below.
-      result.numTrans = props.minTrans;
-      result.numOpaque = numSlotsToPlace - props.minTrans;
+      // result.numTrans = props.minTrans;
+      // result.numOpaque = numSlotsToPlace - props.minTrans;
 
       // We want as many slots as possible to be transparent and at least one
       // opaque slot, while satisfying all buffering constraints
-      // unsigned actualMinOpaque = std::max(1U, props.minOpaque);
-      // if (props.maxTrans.has_value() &&
-      //     (props.maxTrans.value() < numSlotsToPlace - actualMinOpaque)) {
-      //   result.numTrans = props.maxTrans.value();
-      //   result.numOpaque = numSlotsToPlace - result.numTrans;
-      // } else {
-      //   result.numOpaque = actualMinOpaque;
-      //   result.numTrans = numSlotsToPlace - result.numOpaque;
-      // }
+      unsigned actualMinOpaque = std::max(1U, props.minOpaque);
+      if (props.maxTrans.has_value() &&
+          (props.maxTrans.value() < numSlotsToPlace - actualMinOpaque)) {
+        result.numTrans = props.maxTrans.value();
+        result.numOpaque = numSlotsToPlace - result.numTrans;
+      } else {
+        result.numOpaque = actualMinOpaque;
+        result.numTrans = numSlotsToPlace - result.numOpaque;
+      }
     } else
       // All slots should be transparent
       result.numTrans = numSlotsToPlace;
 
     Channel channel(value);
     deductInternalBuffers(channel, result);
+
+    // If a single opaque slot is placed, add a transparent one behind it to
+    // ensure circuit correctness
+    if (result.numOpaque == 1 && result.numTrans == 0 &&
+        props.maxTrans.value_or(1) > 0)
+      result.numTrans = 1;
+
     placement[value] = result;
   }
 
