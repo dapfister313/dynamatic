@@ -130,7 +130,7 @@ exit_on_fail "Failed to apply standard transformations to cf" \
 
 # cf transformations (dynamatic) 
 "$DYNAMATIC_OPT_BIN" "$F_CF_TRANFORMED" --allow-unregistered-dialect \
-  --flatten-memref-row-major --flatten-memref-calls --arith-reduce-strength \
+  --flatten-memref-row-major --flatten-memref-calls --arith-reduce-strength="max-adder-depth-mul=0" \
   --push-constants \
   > "$F_CF_DYN_TRANSFORMED"
 exit_on_fail "Failed to apply Dynamatic transformations to cf" \
