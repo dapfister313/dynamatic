@@ -17,7 +17,10 @@
 #include "dynamatic/Transforms/HandshakeCanonicalize.h"
 #include "circt/Dialect/Handshake/HandshakeOps.h"
 #include "dynamatic/Support/LogicBB.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallSet.h"
 
 using namespace circt;
 using namespace mlir;
@@ -169,6 +172,110 @@ struct DowngradeIndexlessControlMerge
   }
 };
 
+struct EliminateUnusedForkResultsPattern
+    : mlir::OpRewritePattern<handshake::ForkOp> {
+  using mlir::OpRewritePattern<handshake::ForkOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(handshake::ForkOp forkOp,
+                                PatternRewriter &rewriter) const override {
+    llvm::SmallSet<unsigned, 4> unusedIndexes;
+
+    for (auto res : llvm::enumerate(forkOp.getResults()))
+      if (res.value().getUses().empty())
+        unusedIndexes.insert(res.index());
+
+    if (unusedIndexes.empty())
+      return failure();
+
+    // Create a new fork op, dropping the unused results.
+    rewriter.setInsertionPoint(forkOp);
+    auto operand = forkOp.getOperand();
+    auto newForkOp = rewriter.create<handshake::ForkOp>(
+        forkOp.getLoc(), operand,
+        forkOp.getNumResults() - unusedIndexes.size());
+    inheritBB(forkOp, newForkOp);
+    rewriter.updateRootInPlace(forkOp, [&] {
+      unsigned i = 0;
+      for (auto oldRes : llvm::enumerate(forkOp.getResults()))
+        if (unusedIndexes.count(oldRes.index()) == 0)
+          oldRes.value().replaceAllUsesWith(newForkOp.getResults()[i++]);
+    });
+    rewriter.eraseOp(forkOp);
+    return success();
+  }
+};
+
+struct EliminateForkToForkPattern : mlir::OpRewritePattern<handshake::ForkOp> {
+  using mlir::OpRewritePattern<handshake::ForkOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(handshake::ForkOp forkOp,
+                                PatternRewriter &rewriter) const override {
+    auto parentForkOp = forkOp.getOperand().getDefiningOp<handshake::ForkOp>();
+    if (!parentForkOp)
+      return failure();
+
+    unsigned totalNumOuts = forkOp.getSize() + parentForkOp.getSize();
+    auto newParentForkOp = rewriter.create<handshake::ForkOp>(
+        parentForkOp.getLoc(), parentForkOp.getOperand(), totalNumOuts);
+    inheritBB(parentForkOp, newParentForkOp);
+    rewriter.replaceOp(parentForkOp, newParentForkOp.getResults().take_front(
+                                         parentForkOp.getSize()));
+    rewriter.replaceOp(
+        forkOp, newParentForkOp.getResults().take_back(forkOp.getSize()));
+    return success();
+  }
+};
+
+struct DoNotForkConstants : public OpRewritePattern<handshake::ForkOp> {
+  using OpRewritePattern<handshake::ForkOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(handshake::ForkOp forkOp,
+                                PatternRewriter &rewriter) const override {
+    // The fork must be fed by a constant, possible extended/truncated
+    Operation *defOp = forkOp.getOperand().getDefiningOp();
+    SmallVector<Operation *> bitMods;
+    while (isa_and_nonnull<arith::TruncIOp, arith::ExtSIOp, arith::ExtUIOp>(
+        defOp)) {
+      bitMods.push_back(defOp);
+      defOp = defOp->getOperand(0).getDefiningOp();
+    }
+    if (!defOp || !isa<handshake::ConstantOp>(defOp))
+      return failure();
+    handshake::ConstantOp cstOp = dyn_cast<handshake::ConstantOp>(defOp);
+    mlir::TypedAttr cstVal = cstOp.getValue();
+
+    // Create as many constants (+ possible extensions/truncations) as there are
+    // fork outputs, and create a new fork for the control signal
+    auto newForkOp = rewriter.create<handshake::ForkOp>(
+        cstOp->getLoc(), cstOp.getOperand(), forkOp.getNumResults());
+    inheritBB(cstOp, newForkOp);
+    SmallVector<Value> newResults;
+    for (OpResult ctrlOpr : newForkOp->getResults()) {
+      // Create the new constant
+      auto newCstOp = rewriter.create<handshake::ConstantOp>(
+          cstOp->getLoc(), cstVal.getType(), cstVal, ctrlOpr);
+      Value cstRes = newCstOp.getResult();
+      inheritBB(cstOp, newCstOp);
+
+      // Recreate bitwidth modifiers in the same order (iterate in reverse
+      // discovery order)
+      for (size_t idx = bitMods.size(); idx >= 1; --idx) {
+        Operation *mod = bitMods[idx - 1];
+        Operation *newMod = rewriter.create(
+            mod->getLoc(),
+            StringAttr::get(getContext(), mod->getName().getStringRef()),
+            {cstRes}, mod->getResultTypes());
+        inheritBB(mod, newMod);
+        cstRes = newMod->getResult(0);
+      }
+      newResults.push_back(cstRes);
+    }
+
+    rewriter.replaceOp(forkOp, newResults);
+    return success();
+  }
+};
+
 /// Simple driver for the Handshake canonicalization pass, based on a greedy
 /// pattern rewriter.
 struct HandshakeCanonicalizePass
@@ -187,7 +294,8 @@ struct HandshakeCanonicalizePass
     config.useTopDownTraversal = true;
     config.enableRegionSimplification = false;
     RewritePatternSet patterns{ctx};
-    patterns.add<EraseUnconditionalBranches>(ctx);
+    patterns.add<EraseUnconditionalBranches, EliminateForkToForkPattern,
+                 EliminateUnusedForkResultsPattern, DoNotForkConstants>(ctx);
     if (!justBranches)
       patterns
           .add<EraseSingleInputMerges, EraseSingleInputMuxes,

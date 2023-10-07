@@ -163,23 +163,5 @@ exit_on_fail "Failed to profile cf-level" "Profiled cf-level"
 export_dot "visual" "$F_HANDSHAKE_TRANSFORMED" "visual"
 export_dot "legacy" "$F_HANDSHAKE_TRANSFORMED" "$KERNEL_NAME"
 
-# Smart buffer placement
-# echo_info "Running smart buffer placement"
-# "$DYNAMATIC_OPT_BIN" "$F_HANDSHAKE_TRANSFORMED" \
-#   --allow-unregistered-dialect \
-#   --handshake-set-buffering-properties="version=fpga20" \
-#   --handshake-place-buffers="frequencies=$OUTPUT_DIR/frequencies.csv timing-models=$DYNAMATIC_DIR/data/components.json dump-logs" \
-#   > "$F_HANDSHAKE_BUFFERED"
-# RET=$?
-# mv buffer-placement "$OUTPUT_DIR" > /dev/null 2>&1 
-# if [[ $RET -ne 0 ]]; then
-#     echo_fatal "Failed to place smart buffers"
-#     exit 1
-# fi
-# echo_info "Placed smart buffers"
-
-# export_dot "visual" "$F_HANDSHAKE_BUFFERED" "buf_visual"
-# export_dot "legacy" "$F_HANDSHAKE_BUFFERED" "buf_$KERNEL_NAME"
-
 echo_info "All done!"
 echo ""
