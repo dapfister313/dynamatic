@@ -152,25 +152,41 @@ static size_t fixPortNumber(Operation *op, size_t idx, bool isSrcOp) {
       .Default([&](auto) { return idx; });
 }
 
-static bool channelCanExist(ChannelInfo &info) {
-  // Identify the channel referenced by the information
-  if (names.find(info.src) == names.end()) {
-    llvm::errs() << "No operation named " << info.src << " could be found\n";
-    return false;
+static BlockArgument getFunArg(handshake::FuncOp funcOp, StringRef srcName) {
+  unsigned numArgs = funcOp.getNumArguments();
+  for (size_t idx = 0; idx < numArgs; ++idx) {
+    std::string argName =
+        idx == numArgs - 1 ? "start_0" : funcOp.getArgName(idx).str();
+    if (argName == srcName)
+      return funcOp.getArguments()[idx];
   }
+  return nullptr;
+}
+
+static bool channelCanExist(handshake::FuncOp funcOp, ChannelInfo &info) {
+  // Identify source port
+  if (!getFunArg(funcOp, info.src)) {
+    if (names.find(info.src) == names.end()) {
+      llvm::errs() << "No operation named " << info.src << " could be found\n";
+      return false;
+    }
+    Operation *srcOp = names[info.src];
+    size_t srcPortIdx = fixPortNumber(srcOp, info.srcPort - 1, true);
+    if (srcPortIdx > srcOp->getNumResults()) {
+      llvm::errs() << "Operation " << info.src << " has "
+                   << srcOp->getNumResults() << " results but source port is "
+                   << srcPortIdx << "";
+      return false;
+    }
+  }
+
+  // Identify destination port
   if (names.find(info.dst) == names.end()) {
     llvm::errs() << "No operation named " << info.dst << " could be found\n";
     return false;
   }
-  Operation *srcOp = names[info.src], *dstOp = names[info.dst];
-  size_t srcPortIdx = fixPortNumber(srcOp, info.srcPort - 1, true);
+  Operation *dstOp = names[info.dst];
   size_t dstPortIdx = fixPortNumber(dstOp, info.dstPort - 1, false);
-  if (srcPortIdx > srcOp->getNumResults()) {
-    llvm::errs() << "Operation " << info.src << " has "
-                 << srcOp->getNumResults() << " results but source port is "
-                 << srcPortIdx << "";
-    return false;
-  }
   if (dstPortIdx > dstOp->getNumOperands()) {
     llvm::errs() << "Operation " << info.src << " has "
                  << dstOp->getNumOperands()
@@ -180,20 +196,19 @@ static bool channelCanExist(ChannelInfo &info) {
   return true;
 }
 
-static bool findChannel(ChannelInfo &info, mlir::Value &channel) {
-  Operation *srcOp = names[info.src], *dstOp = names[info.dst];
-  size_t srcPortIdx = fixPortNumber(srcOp, info.srcPort - 1, true);
-  size_t dstPortIdx = fixPortNumber(dstOp, info.dstPort - 1, false);
-  if (srcOp->getResult(srcPortIdx) != dstOp->getOperand(dstPortIdx)) {
-    // llvm::errs() << "Port " << info.srcPort << " (" << srcPortIdx << ") of "
-    //              << info.src << " and port " << info.dstPort << " ("
-    //              << dstPortIdx << ") of " << info.dst
-    //              << " do not appear to match.\n";
-    return false;
+static bool findChannel(handshake::FuncOp funcOp, ChannelInfo &info,
+                        mlir::Value &channel) {
+  if (BlockArgument blockArg = getFunArg(funcOp, info.src); blockArg) {
+    channel = blockArg;
+  } else {
+    Operation *srcOp = names[info.src];
+    size_t srcPortIdx = fixPortNumber(srcOp, info.srcPort - 1, true);
+    channel = srcOp->getResult(srcPortIdx);
   }
 
-  channel = srcOp->getResult(srcPortIdx);
-  return true;
+  Operation *dstOp = names[info.dst];
+  size_t dstPortIdx = fixPortNumber(dstOp, info.dstPort - 1, false);
+  return channel == dstOp->getOperand(dstPortIdx);
 }
 
 static LogicalResult annotateFunc(handshake::FuncOp funcOp,
@@ -353,12 +368,12 @@ static LogicalResult annotateFunc(handshake::FuncOp funcOp,
       continue;
     }
 
-    if (!channelCanExist(info))
+    if (!channelCanExist(funcOp, info))
       return failure();
 
     // Try to find the value that is refered to by the line
     mlir::Value channel;
-    if (findChannel(info, channel)) {
+    if (findChannel(funcOp, info, channel)) {
       llvm::errs() << "[INFO] Identified constraint on line " << idx
                    << " as directly connected channel"
                    << "\n";
@@ -369,11 +384,17 @@ static LogicalResult annotateFunc(handshake::FuncOp funcOp,
     } else {
       // Failing that, try to find a path between source and destination
       SmallVector<mlir::Value> path;
-      Operation *srcOp = names[info.src], *dstOp = names[info.dst];
-      size_t srcPortIdx = fixPortNumber(srcOp, info.srcPort - 1, true);
+      Value resVal;
+      if (BlockArgument blockArg = getFunArg(funcOp, info.src); blockArg) {
+        resVal = blockArg;
+      } else {
+        Operation *srcOp = names[info.src];
+        size_t srcPortIdx = fixPortNumber(srcOp, info.srcPort - 1, true);
+        resVal = srcOp->getResult(srcPortIdx);
+      }
+      Operation *dstOp = names[info.dst];
       size_t dstPortIdx = fixPortNumber(dstOp, info.dstPort - 1, false);
-      if (!findPath(srcOp->getResult(srcPortIdx), dstOp->getOperand(dstPortIdx),
-                    path)) {
+      if (!findPath(resVal, dstOp->getOperand(dstPortIdx), path)) {
         llvm::errs() << "Failed to find channel or path corresponding to "
                         "constraint on line "
                      << idx << "\n";
@@ -416,11 +437,11 @@ BufferPlacementMILP::BufferPlacementMILP(FuncInfo &funcInfo,
 
   // Combines any channel-specific buffering properties coming from IR
   // annotations to internal buffer specifications and stores the combined
-  // properties into the channel map. Fails and marks the MILP unsatisfiable if
-  // any of those combined buffering properties become unsatisfiable.
+  // properties into the channel map. Fails and marks the MILP unsatisfiable
+  // if any of those combined buffering properties become unsatisfiable.
   auto deriveBufferingProperties = [&](Channel &channel) -> LogicalResult {
-    // Increase the minimum number of slots if internal buffers are present, and
-    // check for satisfiability
+    // Increase the minimum number of slots if internal buffers are present,
+    // and check for satisfiability
     if (failed(addInternalBuffers(channel))) {
       unsatisfiable = true;
       std::stringstream stream;
@@ -476,7 +497,8 @@ LogicalResult BufferPlacementMILP::setup() {
       failed(addElasticityConstraints(nonMemChannels, allUnits)))
     return failure();
 
-  // Add throughput constraints over each CFDFC that was marked to be optimized
+  // Add throughput constraints over each CFDFC that was marked to be
+  // optimized
   for (auto &[cfdfc, _] : vars.cfdfcs)
     if (funcInfo.cfdfcs[cfdfc])
       if (failed(addThroughputConstraints(*cfdfc)))
@@ -569,8 +591,8 @@ LogicalResult BufferPlacementMILP::createVars() {
   if (failed(createChannelVars()))
     return failure();
 
-  // Update the model before returning so that these variables can be referenced
-  // safely during the rest of model creation
+  // Update the model before returning so that these variables can be
+  // referenced safely during the rest of model creation
   model.update();
   return success();
 }
@@ -657,8 +679,9 @@ BufferPlacementMILP::addCustomChannelConstraints(ValueRange customChannels) {
       model.addConstr(chVars.bufIsOpaque == 1, "custom_forceOpaque");
       if (props.minTrans > 0) {
         // If the properties ask for both opaque and transaprent slots, let
-        // opaque slots take over. Transparents slots will be placed "manually"
-        // from the total number of slots indicated by the MILP's result
+        // opaque slots take over. Transparents slots will be placed
+        // "manually" from the total number of slots indicated by the MILP's
+        // result
         size_t idx;
         Operation *producer = getChannelProducer(channel, &idx);
         assert(producer && "channel producer must exist");
@@ -765,9 +788,9 @@ BufferPlacementMILP::addPathConstraints(ValueRange pathChannels,
     model.addConstr(t1 <= targetPeriod, "path_channelInPeriod");
     // Arrival time at channel's output must be lower than target clock period
     model.addConstr(t2 <= targetPeriod, "path_channelOutPeriod");
-    // If there isn't an opaque buffer on the channel, arrival time at channel's
-    // output must be greater than at channel's input. We also need to account
-    // for any channel delay
+    // If there isn't an opaque buffer on the channel, arrival time at
+    // channel's output must be greater than at channel's input. We also need
+    // to account for any channel delay
     double delay = channels[channel].delay;
     model.addConstr(t2 >= t1 + delay - maxPeriod * chVars.bufIsOpaque,
                     "path_opaqueChannel");
@@ -784,8 +807,8 @@ BufferPlacementMILP::addPathConstraints(ValueRange pathChannels,
       if (failed(timingDB.getTotalDelay(op, SignalType::DATA, dataDelay)))
         dataDelay = 0.0;
 
-      // The unit is not pipelined, add a path constraint for each input/output
-      // port pair in the unit
+      // The unit is not pipelined, add a path constraint for each
+      // input/output port pair in the unit
       forEachIOPair(op, [&](Value in, Value out) {
         GRBVar &tInPort = vars.channels[in].tPathOut;
         GRBVar &tOutPort = vars.channels[out].tPathIn;
@@ -794,8 +817,8 @@ BufferPlacementMILP::addPathConstraints(ValueRange pathChannels,
         model.addConstr(tOutPort >= tInPort + dataDelay, "path_combDelay");
       });
     } else {
-      // The unit is pipelined, add a constraint for every of the unit's inputs
-      // and every of the unit's output ports
+      // The unit is pipelined, add a constraint for every of the unit's
+      // inputs and every of the unit's output ports
 
       // Input port constraints
       for (Value inChannel : op->getOperands()) {
@@ -824,7 +847,8 @@ BufferPlacementMILP::addPathConstraints(ValueRange pathChannels,
           outPortDelay = 0.0;
 
         GRBVar &tOutPort = vars.channels[outChannel].tPathIn;
-        // Arrival time at unit's output port is equal to the output port delay
+        // Arrival time at unit's output port is equal to the output port
+        // delay
         model.addConstr(tOutPort == outPortDelay, "path_outDelay");
       }
     }
@@ -957,13 +981,13 @@ LogicalResult BufferPlacementMILP::addObjective() {
     }
   }
 
-  // In case we ran the MILP without providing any CFDFC, set the maximum CFDFC
-  // coefficient to any positive value
+  // In case we ran the MILP without providing any CFDFC, set the maximum
+  // CFDFC coefficient to any positive value
   if (maxCoefCFDFC == 0.0)
     maxCoefCFDFC = 1.0;
 
-  // For each channel, add a "penalty" in case a buffer is added to the channel,
-  // and another penalty that depends on the number of slots
+  // For each channel, add a "penalty" in case a buffer is added to the
+  // channel, and another penalty that depends on the number of slots
   double bufPenaltyMul = 1e-4;
   double slotPenaltyMul = 1e-5;
   for (auto &[channel, chVar] : vars.channels) {
@@ -1049,8 +1073,8 @@ unsigned BufferPlacementMILP::getChannelNumExecs(Value channel) {
 
   // Iterate over all CFDFCs which contain the channel to determine its total
   // number of executions. Backedges are executed one less time than "forward
-  // edges" since they are only taken between executions of the cycle the CFDFC
-  // represents
+  // edges" since they are only taken between executions of the cycle the
+  // CFDFC represents
   unsigned numExec = isBackedge(channel) ? 0 : 1;
   for (auto &[cfdfc, _] : funcInfo.cfdfcs)
     if (cfdfc->channels.contains(channel))
