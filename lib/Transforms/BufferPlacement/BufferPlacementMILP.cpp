@@ -445,7 +445,8 @@ BufferPlacementMILP::BufferPlacementMILP(FuncInfo &funcInfo,
     if (failed(addInternalBuffers(channel))) {
       unsatisfiable = true;
       std::stringstream stream;
-      stream << "Including internal component buffers into buffering "
+      stream << "For channel " << getChannelName(channel.value)
+             << ": including internal component buffers into buffering "
                 "properties of outgoing channel made them unsatisfiable. "
                 "Properties are "
              << *channel.props;
