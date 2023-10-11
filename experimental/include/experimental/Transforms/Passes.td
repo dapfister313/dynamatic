@@ -28,4 +28,12 @@ def HandshakeFixArgNames : Pass<"handshake-fix-arg-names", "mlir::ModuleOp"> {
             "Path to source C file from which the IR was generated.">];
 }
 
+def HandshakeRemoveMemories : Pass<"handshake-remove-memories", "mlir::ModuleOp"> {
+  let summary = "Remove memories from Handshake functions";
+  let description = [{
+    Hacks for Louis.
+  }];
+  let constructor = "dynamatic::experimental::createHandshakeRemoveMemories()";
+}
+
 #endif // EXPERIMENTAL_TRANSFORMS_PASSES_TD

@@ -46,8 +46,8 @@ public:
   /// flags, plus a pointer to a timing database that must be valid in legacy
   /// mode (when building Dynamatic in debug mode, the constructor will assert
   /// if the `legacy` flag is true and the timing database is nullptr).
-  DOTPrinter(Mode mode, EdgeStyle edgeStyle,
-             TimingDatabase *timingDB = nullptr);
+  DOTPrinter(Mode mode, EdgeStyle edgeStyle, TimingDatabase *timingDB = nullptr,
+             bool justFuckItUp = false);
 
   /// Prints Handshake-level IR to standard output.
   LogicalResult printDOT(mlir::ModuleOp mod);
@@ -62,6 +62,7 @@ private:
   TimingDatabase *timingDB;
   /// The stream to output to.
   mlir::raw_indented_ostream os;
+  bool justFuckItUp = false;
 
   /// Maintain a mapping of module names and the number of times one of those
   /// modules have been instantiated in the design. This is used to generate
@@ -89,6 +90,12 @@ private:
   /// it is the responsibility of the caller of this method to insert an opening
   /// bracket before the call and a closing bracket after the call.
   LogicalResult annotateArgumentNode(handshake::FuncOp funcOp, size_t idx);
+
+  /// Computes all data attributes of a function argument (indicated by its
+  /// index) for use in legacy Dynamatic and prints them to the output stream;
+  /// it is the responsibility of the caller of this method to insert an opening
+  /// bracket before the call and a closing bracket after the call.
+  LogicalResult annotateResultNode(handshake::FuncOp funcOp, size_t idx);
 
   /// Computes all data attributes of an edge between a function argument
   /// (indicated by its index) and an operation for use in legacy Dynamatic and

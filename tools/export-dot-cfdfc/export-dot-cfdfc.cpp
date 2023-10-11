@@ -1,4 +1,4 @@
-//===- buffers.cpp - Export Handshake-level IR to DOT --------*- C++ -*-===//
+//===- export-dot-cfdfc.cpp - Export Handshake-level IR to DOT --*- C++ -*-===//
 //
 // Dynamatic is under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -16,34 +16,19 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "circt/Dialect/Handshake/HandshakeOps.h"
 #include "dynamatic/Support/DOTPrinter.h"
+#include "dynamatic/Support/Logging.h"
 #include "dynamatic/Support/TimingModels.h"
-#include "dynamatic/Transforms/BufferPlacement/BufferPlacementMILP.h"
-#include "dynamatic/Transforms/BufferPlacement/BufferingProperties.h"
-#include "dynamatic/Transforms/BufferPlacement/HandshakePlaceBuffers.h"
-#include "dynamatic/Transforms/BufferPlacement/HandshakeSetBufferingProperties.h"
-#include "dynamatic/Transforms/HandshakeCanonicalize.h"
-#include "experimental/Transforms/HandshakeRemoveMemories.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/MLIRContext.h"
-#include "mlir/IR/Value.h"
 #include "mlir/Parser/Parser.h"
-#include "mlir/Pass/PassManager.h"
-#include "mlir/Support/LogicalResult.h"
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/SourceMgr.h"
-#include <cctype>
-#include <fstream>
-#include <iterator>
-#include <string>
-#include <unordered_map>
+#include <system_error>
 
 using namespace llvm;
 using namespace mlir;
@@ -54,17 +39,6 @@ static cl::OptionCategory mainCategory("Application options");
 static cl::opt<std::string> inputFileName(cl::Positional,
                                           cl::desc("<input file>"),
                                           cl::cat(mainCategory));
-
-static cl::opt<std::string>
-    bufferInfoFilepath("buffer-info", cl::Optional,
-                       cl::desc("Path to CSV-formatted file containing "
-                                "per-channel buffering constraints."),
-                       cl::init(""), cl::cat(mainCategory));
-
-static cl::opt<std::string>
-    frequenciesFilepath("frequencies", cl::Optional,
-                        cl::desc("BB transition frequencies"), cl::init(""),
-                        cl::cat(mainCategory));
 
 static cl::opt<std::string> timingDBFilepath(
     "timing-models", cl::Optional,
@@ -77,13 +51,27 @@ static cl::opt<std::string> timingDBFilepath(
         "file defining the default timing models in Dynamatic."),
     cl::init("data/components.json"), cl::cat(mainCategory));
 
-static cl::opt<double> targetCP("period", cl::Optional,
-                                cl::desc("Target period, in ns"), cl::init(4.0),
-                                cl::cat(mainCategory));
+static cl::opt<std::string> modeArg(
+    "mode", cl::Optional,
+    cl::desc(
+        "Mode in which to run the export tool. This allows to control the "
+        "structure of the resulting DOT. In particular, the tool's output "
+        "can be made compatible with some of legacy Dynamatic's tools, at "
+        "the cost of added constraints on the input IR (which may be "
+        "\"too general\" for legacy Dynamatic). Available modes are:\n"
+        "\t- visual (cleanest to look at, default)\n"
+        "\t- legacy (compatible with legacy dot2vhdl tool)\n"
+        "\t- legacy-buffers (compatible with legacy Buffers/dot2vhdl tools)"),
+    cl::init("visual"), cl::cat(mainCategory));
 
-static cl::opt<double> timeout("timeout", cl::Optional,
-                               cl::desc("Gurobi timeout, in s"), cl::init(180),
-                               cl::cat(mainCategory));
+static cl::opt<std::string> edgeStyleArg(
+    "edge-style", cl::Optional,
+    cl::desc("Style in which to render edges in the resulting DOTs (this is "
+             "essentially the 'splines' attribute of the top-level DOT graph). "
+             "Available options are:\n"
+             "\t- spline (default)\n"
+             "\t- ortho (orthogonal polylines)\n"),
+    cl::init("spline"), cl::cat(mainCategory));
 
 int main(int argc, char **argv) {
   InitLLVM y(argc, argv);
@@ -92,8 +80,7 @@ int main(int argc, char **argv) {
       argc, argv,
       "Exports a DOT graph corresponding to the module for visualization\n"
       "and legacy-compatibility purposes.The pass only supports exporting\n"
-      "the graph of a single Handshake function at the moment, and will "
-      "fail\n"
+      "the graph of a single Handshake function at the moment, and will fail\n"
       "if there is more than one Handhsake function in the module.");
 
   auto fileOrErr = MemoryBuffer::getFileOrSTDIN(inputFileName.c_str());
@@ -104,9 +91,11 @@ int main(int argc, char **argv) {
   }
 
   // Functions feeding into HLS tools might have attributes from high(er) level
-  // dialects or parsers. Allow unregistered dialects to not fail in these cases
+  // dialects or parsers. Allow unregistered dialects to not fail in these
+  // cases
   MLIRContext context;
-  context.loadDialect<memref::MemRefDialect, arith::ArithDialect,
+  context.loadDialect<func::FuncDialect, memref::MemRefDialect,
+                      arith::ArithDialect, LLVM::LLVMDialect,
                       handshake::HandshakeDialect>();
   context.allowUnregisteredDialects();
 
@@ -117,36 +106,52 @@ int main(int argc, char **argv) {
       mlir::parseSourceFile<ModuleOp>(sourceMgr, &context));
   if (!module)
     return 1;
-  mlir::ModuleOp modOp = *module;
 
-  // Extract the single function from the module
-  auto funcs = modOp.getOps<handshake::FuncOp>();
-  if (std::distance(funcs.begin(), funcs.end()) != 1) {
-    modOp->emitError() << "We only support one Handshake function per module";
+  // Decode the "mode" argument
+  DOTPrinter::Mode mode;
+  if (modeArg == "visual")
+    mode = DOTPrinter::Mode::VISUAL;
+  else if (modeArg == "legacy")
+    mode = DOTPrinter::Mode::LEGACY;
+  else if (modeArg == "legacy-buffers")
+    mode = DOTPrinter::Mode::LEGACY_BUFFERS;
+  else {
+    llvm::errs() << "Unkwown mode \"" << modeArg
+                 << "\" provided, must be one of \"visual\", \"legacy\", "
+                    "\"legacy-buffers\".\n";
     return 1;
   }
 
-  // Run the buffer placement pass
-  PassManager pm(&context);
-  pm.addPass(dynamatic::buffer::createHandshakeSetBufferingProperties());
-  pm.addPass(dynamatic::buffer::createHandshakePlaceBuffersPass(
-      frequenciesFilepath, timingDBFilepath, false, targetCP, timeout, true,
-      bufferInfoFilepath));
-  pm.addPass(dynamatic::createHandshakeCanonicalize());
-  pm.addPass(dynamatic::experimental::createHandshakeRemoveMemories());
-  if (failed(pm.run(modOp))) {
-    llvm::errs() << "Failed to run buffer pass.\n";
+  // Decode the "edgeStyle" argument
+  DOTPrinter::EdgeStyle edgeStyle;
+  if (edgeStyleArg == "spline")
+    edgeStyle = DOTPrinter::EdgeStyle::SPLINE;
+  else if (edgeStyleArg == "ortho")
+    edgeStyle = DOTPrinter::EdgeStyle::ORTHO;
+  else {
+    llvm::errs() << "Unkwown edge style \"" << edgeStyleArg
+                 << "\" provided, must be one of \"spline\", \"ortho\".\n";
     return 1;
   }
 
-  // Parse timing models for DOT printer
-  TimingDatabase timingDB(&context);
-  if (failed(TimingDatabase::readFromJSON(timingDBFilepath, timingDB))) {
-    llvm::errs() << "Failed to read timing database at '" << timingDBFilepath
-                 << "'.\n";
-    return 1;
+  std::error_code ec;
+  Logger log("cfdfcs", ec);
+
+  bool legacyCompMode = mode == DOTPrinter::Mode::LEGACY ||
+                        mode == DOTPrinter::Mode::LEGACY_BUFFERS;
+  if (legacyCompMode) {
+    // In legacy mode, read timing models for dataflow components from a
+    // JSON-formatted database
+    TimingDatabase timingDB(&context);
+    if (failed(TimingDatabase::readFromJSON(timingDBFilepath, timingDB))) {
+      llvm::errs() << "Failed to read timing database at \"" << timingDBFilepath
+                   << "\"\n";
+      return 1;
+    }
+    DOTPrinter printer(mode, edgeStyle, &timingDB);
+    return failed(printer.printDOT(*module));
   }
-  DOTPrinter printer(DOTPrinter::Mode::LEGACY, DOTPrinter::EdgeStyle::SPLINE,
-                     &timingDB);
+
+  DOTPrinter printer(mode, edgeStyle);
   return failed(printer.printDOT(*module));
 }

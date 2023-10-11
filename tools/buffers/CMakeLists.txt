@@ -11,6 +11,7 @@ target_link_libraries(buffers
   PRIVATE
   DynamaticSupport
   DynamaticTransforms
+  DynamaticExperimentalTransforms
   DynamaticBufferPlacement
 
   CIRCTHandshake
