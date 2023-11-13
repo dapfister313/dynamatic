@@ -16,6 +16,7 @@
 #include "circt/Dialect/Handshake/HandshakeDialect.h"
 #include "circt/Dialect/Handshake/HandshakeOps.h"
 #include "circt/Dialect/Handshake/HandshakePasses.h"
+#include "dynamatic/Support/Logging.h"
 #include "dynamatic/Support/LogicBB.h"
 #include "dynamatic/Transforms/BufferPlacement/BufferingProperties.h"
 #include "dynamatic/Transforms/BufferPlacement/FPGA20Buffers.h"
@@ -50,6 +51,7 @@ FPGA20Buffers::FPGA20Buffers(FuncInfo &funcInfo, const TimingDatabase &timingDB,
 
 LogicalResult
 FPGA20Buffers::getPlacement(DenseMap<Value, PlacementResult> &placement) {
+  llvm::errs() << "Went into getPlacement!\n";
   if (status != MILPStatus::OPTIMIZED) {
     std::stringstream ss;
     ss << status;
@@ -98,7 +100,7 @@ FPGA20Buffers::getPlacement(DenseMap<Value, PlacementResult> &placement) {
     deductInternalBuffers(channel, result);
     placement[value] = result;
   }
-
+  
   if (logger)
     logResults(placement);
   return success();
@@ -579,6 +581,37 @@ void FPGA20Buffers::logResults(DenseMap<Value, PlacementResult> &placement) {
     }
     os.unindent();
     os << "\n";
+  }
+
+  std::error_code ec;
+  std::string sep = path::get_separator().str();
+  std::string fp =
+      "buffer-placement" + sep + funcInfo.funcOp.getName().str() + sep;
+  Logger occupancyLogger(fp + "occupancy.csv", ec);
+  llvm::errs() << "File path: " << fp;
+
+  (*occupancyLogger) << "cfdfc,name,occupancy\n";
+
+  // Log token occupancy of all (pipelined) units in all CFDFCs
+  for (auto [idx, cfdfcWithVars] : llvm::enumerate(vars.cfdfcs)) {
+    auto [cf, cfVars] = cfdfcWithVars;
+    (*occupancyLogger) << "Per-unit occupancy of CFDFC #" << idx << ":\n";
+    // for each CFDFC, extract the throughput in double format
+    double throughput;
+    throughput = cfVars.throughput.get(GRB_DoubleAttr_X);
+    for (auto &[op, unitVars] : cfVars.units) {
+      double latency;
+      double occupancy;
+      if (failed(timingDB.getLatency(op, latency)) || latency == 0.0)
+        continue;
+      // the occupancy of the unit is calculated as the product between
+      // throughput and latency
+      occupancy = latency * throughput;
+      llvm::errs() << "Occupancy: " << occupancy << " for fluffyUnicorn\n";
+      (*occupancyLogger) << nameUniquer.getName(*op).str() << ": " << occupancy
+                         << "\n";
+    }
+    (*occupancyLogger) << "\n";
   }
 }
 #endif // DYNAMATIC_GUROBI_NOT_INSTALLED
