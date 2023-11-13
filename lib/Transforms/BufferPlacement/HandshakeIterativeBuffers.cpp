@@ -30,6 +30,7 @@ namespace {
 /// Stores sone data you may want to extract from buffer placement
 struct MyData {
   unsigned someCountOfSomething = 0;
+  unsigned totalNumberOfOpaqueBuffers = 0;
 };
 
 /// Sub-type of the classic buffer placement pass, just so that we can override
@@ -90,12 +91,19 @@ LogicalResult MyBufferPlacementPass::getBufferPlacement(
           << "Failed to extract placement decisions from MILP's solution.";
   }
 
+  // Walkin' in the IR:
+  llvm::errs() << "Walkin' inside the IR:\n";
+  for (Operation &op : info.funcOp.getOps()) {
+    llvm::errs() << "Operation" << op << "\n";
+  }
+
   // Here, before destroying the MILP, extract whatever information you want
   // and store it into your MyData& reference. If you need to extract variable
   // values from the MILP you may need to make some of its fields public (to
   // be discussed in PRs).
   llvm::errs() << "Setting some random count!\n";
-  data.someCountOfSomething = 42;
+  data.someCountOfSomething += 10;
+  llvm::errs() << "Current count: " << data.someCountOfSomething << "\n";
 
   delete milp;
   return res;
@@ -132,11 +140,10 @@ struct HandshakeIterativeBuffersPass
 
 void HandshakeIterativeBuffersPass::runOnOperation() {
   ModuleOp modOp = getOperation();
+  MyData data;
 
   while (true) {
     // Data object to extract information from buffer placement
-    MyData data;
-
     // Use a pass manager to run buffer placement on the current module
     PassManager pm(&getContext());
     pm.addPass(std::make_unique<MyBufferPlacementPass>(
@@ -150,8 +157,9 @@ void HandshakeIterativeBuffersPass::runOnOperation() {
     // - further modify the module by applying any kind of transformation you
     //   want
     // - break out of the loop
-    // - ...
-    if (data.someCountOfSomething == 42) {
+    // - ...$
+    llvm::errs() << "Hi!\n";
+    if (data.someCountOfSomething >= 20) {
       llvm::errs() << "Breaking out of the loop!\n";
       break;
     }
@@ -166,3 +174,4 @@ dynamatic::buffer::createHandshakeIterativeBuffers(
       algorithm, frequencies, timingModels, firstCFDFC, targetCP, timeout,
       dumpLogs);
 }
+
