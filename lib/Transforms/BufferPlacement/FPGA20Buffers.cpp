@@ -37,6 +37,13 @@ using namespace dynamatic;
 using namespace dynamatic::buffer;
 using namespace dynamatic::buffer::fpga20;
 
+struct Op_stats {
+  std::string opId;
+  double occupancy;
+  double throughput;
+  Op_stats() : occupancy(0.0), throughput(0.0) {}
+};
+
 FPGA20Buffers::FPGA20Buffers(FuncInfo &funcInfo, const TimingDatabase &timingDB,
                              GRBEnv &env, Logger *logger, double targetPeriod,
                              double maxPeriod, bool legacyPlacement)
@@ -591,27 +598,25 @@ void FPGA20Buffers::logResults(DenseMap<Value, PlacementResult> &placement) {
   llvm::errs() << "File path: " << fp;
 
   (*occupancyLogger) << "cfdfc,name,occupancy\n";
-
+  
+  std::vector<Op_stats> occupancy_info;
   // Log token occupancy of all (pipelined) units in all CFDFCs
+  ResourceSharingInfo sharing_info;
   for (auto [idx, cfdfcWithVars] : llvm::enumerate(vars.cfdfcs)) {
     auto [cf, cfVars] = cfdfcWithVars;
     (*occupancyLogger) << "Per-unit occupancy of CFDFC #" << idx << ":\n";
     // for each CFDFC, extract the throughput in double format
-    double throughput;
-    throughput = cfVars.throughput.get(GRB_DoubleAttr_X);
+    sharing_info.throughput = cfVars.throughput.get(GRB_DoubleAttr_X);
     for (auto &[op, unitVars] : cfVars.units) {
-      double latency;
-      double occupancy;
-      if (failed(timingDB.getLatency(op, latency)) || latency == 0.0)
+      sharing_info.op = op;
+      if (failed(timingDB.getLatency(op, sharing_info.op_latency)) || sharing_info.op_latency == 0.0)
         continue;
       // the occupancy of the unit is calculated as the product between
       // throughput and latency
-      occupancy = latency * throughput;
-      llvm::errs() << "Occupancy: " << occupancy << " for fluffyUnicorn\n";
-      (*occupancyLogger) << nameUniquer.getName(*op).str() << ": " << occupancy
-                         << "\n";
+      sharing_info.occupancy = sharing_info.op_latency * sharing_info.throughput;
+      funcInfo.sharing_info.push_back(sharing_info);
+      (*occupancyLogger) << nameUniquer.getName(*sharing_info.op).str() << ": " << sharing_info.occupancy << "\n";
     }
-    (*occupancyLogger) << "\n";
   }
 }
 #endif // DYNAMATIC_GUROBI_NOT_INSTALLED
