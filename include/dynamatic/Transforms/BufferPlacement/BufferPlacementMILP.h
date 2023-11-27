@@ -46,6 +46,25 @@ struct PlacementResult {
   bool opaqueBeforeTrans = true;
 };
 
+//stores/transfers information needed for resource sharing
+struct ResourceSharingInfo {
+  mlir::Operation* op; 
+  double occupancy; 
+  double op_latency;
+  double throughput;
+
+  void print() {
+    llvm::errs() << "Operation " << op 
+                 << ", occupancy: " << occupancy 
+                 << ", latency: " << op_latency 
+                 << ", throughput: " << throughput 
+                 << "\n";
+  }
+  
+  //constructor
+  ResourceSharingInfo() : op(nullptr), occupancy(-1), op_latency(-1), throughput(-1) {}
+};
+
 /// Helper datatype for buffer placement. Simply aggregates all the information
 /// related to the Handshake function under optimization.
 struct FuncInfo {
@@ -57,10 +76,12 @@ struct FuncInfo {
   /// Maps CFDFCs of the function to a boolean indicating whether they each
   /// should be optimized.
   llvm::MapVector<CFDFC *, bool> cfdfcs;
+  //vector used to transfer important resource sharing parameters
+  std::vector<ResourceSharingInfo> sharing_info;
 
   /// Argument-less constructor so that we can use the struct as a value type
   /// for maps.
-  FuncInfo() : funcOp(nullptr){};
+  FuncInfo() : funcOp(nullptr) {};
 
   /// Constructs an instance from the function it refers to. Other struct
   /// members start empty.
