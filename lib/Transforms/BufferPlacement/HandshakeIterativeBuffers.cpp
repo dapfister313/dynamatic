@@ -172,15 +172,14 @@ public:
 struct Group {
   std::vector<mlir::Operation*> items;
   double shared_occupancy;
-  double InitThroughput;
 
   //Constructors
-  Group(mlir::Operation* op, double occupancy, double throughput)
-        : shared_occupancy(occupancy), InitThroughput(throughput) {
+  Group(mlir::Operation* op, double occupancy)
+        : shared_occupancy(occupancy) {
           items.push_back(op);
         }
   Group(mlir::Operation* op)
-        : shared_occupancy(-1), InitThroughput(-1) {
+        : shared_occupancy(-1) {
           items.push_back(op);
         }
 
@@ -195,7 +194,8 @@ struct Group {
 */
 struct Set {
   std::list<Group> groups{};
-  
+  double op_latency;
+
   void addGroup(Group group) {
     groups.push_back(group);
   }
@@ -204,6 +204,32 @@ struct Set {
   Set(Group group) {
     groups.push_back(group);
   }
+  
+  /*
+  bool groups_mergeable(int i, int j) {
+    if(i == j) {
+      return false;
+    }
+
+    if(groups[i].occupancy + groups[j].occupancy > op_latency) {
+      return false;
+    }
+    
+    //make performance analysis here
+
+    return true;
+  }
+
+  bool merge_groups(int i, int j) {
+    if(!groups_mergeable(i, j)) {
+      return false;
+    }
+
+    //merge groups here
+
+    return true;
+  }
+  */
 };
 
 /*
@@ -233,23 +259,20 @@ struct OpSelector {
 */
 class ResourceSharing {
   std::vector<OpSelector> operation_type{};
+  std::map<int, double> throughput;
+  SmallVector<experimental::ArchBB> archs;
   //std::map<llvm::StringRef, int> op_selector; //could be used to eaily determine the operation if there are a lot
   
-  /*
-  void addOpType(ResourceSharingInfo RSitem, llvm::StringRef OpName) {
-    operation_type
-  }
-  */
   double runPerformanceAnalysis() {
     return 0;
   }
 
 public:
   //place resource sharing data retrieved from buffer placement
-  void place_data(std::vector<ResourceSharingInfo> sharing_feedback) {
-    for(auto sharing_item : sharing_feedback) {
+  void place_data(ResourceSharingInfo sharing_feedback) {
+    for(auto sharing_item : sharing_feedback.sharing_init) {
       llvm::StringRef OpName = sharing_item.op->getName().getStringRef();
-      Group item = Group(sharing_item.op, sharing_item.occupancy, sharing_item.throughput);
+      Group item = Group(sharing_item.op, sharing_item.occupancy);
       int loc = -1;
       for(unsigned long i = 0; i < operation_type.size(); i++) {
         if(OpName == operation_type[i].identifier) {
@@ -264,16 +287,96 @@ public:
         operation_type[loc].sets[0].groups.push_front(item);
       }
     }
+    throughput = sharing_feedback.sharing_check;
   }
 
+  void place_BB(SmallVector<experimental::ArchBB> archs_ext) {
+    archs = archs_ext;
+  }
+  
+  void recursiveDFS(unsigned int starting_node, std::vector<bool> &visited) {
+    visited[starting_node] = true;
+    for(auto arch_item : archs) {
+      if(arch_item.srcBB == starting_node && !visited[arch_item.dstBB]) {
+        recursiveDFS(arch_item.dstBB, visited);
+      }
+    }
+  }
+
+  int max(int a, int b) {
+    if(a > b) {
+      return a;
+    }
+    return b;
+  }
+
+  void find_strongly_connected_components() {
+    int BBs = 0;
+    for(auto arch_item : archs) {
+      BBs = max(BBs, arch_item.srcBB);
+      BBs = max(BBs, arch_item.dstBB);
+    }
+    BBs += 1;
+    llvm::errs() << "Number of BBs: " << BBs << "\n\n";
+
+    std::vector<std::vector<bool>> visited(BBs, std::vector<bool>(BBs, false));
+    
+    for(int i = 0; i < BBs; i++) {
+      recursiveDFS(i, visited[i]);
+    }
+
+    std::vector<int> Sets(BBs);
+    int position = 1;
+    bool taken = false;
+    std::vector<int> num_of_items(BBs);
+
+    for(int i = 0; i < BBs; i++) {
+      for(int j = 0; j < BBs; j++) {
+        num_of_items[i] += visited[i][j];
+      }
+    }
+    
+    for(int i = 0; i <= BBs; i++) {
+      for(int j = 0; j < BBs; j++) {
+        if(num_of_items[j] != i) {
+          continue;
+        }
+        for(int k = 0; k < BBs; k++) {
+          if(visited[j][k] && !Sets[k]) {
+            Sets[k] = position;
+            taken = true;
+          }
+        }
+      }
+      if(taken) {
+        position += 1;
+        taken = false;
+      }
+    }
+    llvm::errs() << "\nDifferent Sets: \n";
+    for(int i = 0; i < BBs; i++) {
+      llvm::errs() << Sets[i] << ", ";
+    }
+    llvm::errs() << "\n\n";
+    return;
+  }
+  
   void print() {
+    llvm::errs() << "\n***** Basic Blocks *****\n";
+    for(auto arch_item : archs) {
+      llvm::errs() << "Source: " << arch_item.srcBB << ", Destination: " << arch_item.dstBB << "\n";
+    }
+    std::map<int, double>::iterator it = throughput.begin();
+    llvm::errs() << "\n**** Throughput per CFDFC ****\n";
+    for(; it != throughput.end(); it++) {
+      llvm::errs() << "CFDFC #" << it->first << ": " << it->second << "\n";
+    }
     for(auto Op : operation_type) {
-      llvm::errs() << "*** New Operation type: " << Op.identifier << " ***\n";
+      llvm::errs() << "\n*** New Operation type: " << Op.identifier << " ***\n";
       for(auto set : Op.sets) {
         llvm::errs() << "** New set **\n";
         for(auto group : set.groups) {
           llvm::errs() << "* New group *\n";
-          llvm::errs() << "Throughput: " << group.InitThroughput << "\n";
           llvm::errs() << "Number of entries: " << group.items.size() << "\n";
         }
       }
@@ -284,7 +387,8 @@ public:
 /// Stores some data you may want to extract from buffer placement
 struct MyData {
   //extracts needed resource sharing data from FuncInfo struct
-  std::vector<ResourceSharingInfo> sharing_feedback; 
+  ResourceSharingInfo sharing_feedback; 
+  SmallVector<experimental::ArchBB> archs;
   unsigned someCountOfSomething = 0;
   unsigned totalNumberOfOpaqueBuffers = 0;
 };
@@ -362,6 +466,12 @@ LogicalResult MyBufferPlacementPass::getBufferPlacement(
   llvm::errs() << "Current count: " << data.someCountOfSomething << "\n";
 
   data.sharing_feedback = info.sharing_info;
+  data.archs = info.archs;
+  /*
+  for(auto arch_item : info.archs) {
+    llvm::errs() << "Source: " << arch_item.srcBB << ", Destination: " << arch_item.dstBB << "\n";
+  }
+  */
   data.someCountOfSomething += 10;
   delete milp;
   return res;
@@ -468,19 +578,21 @@ void HandshakeIterativeBuffersPass::runOnOperation() {
     // - break out of the loop
     // - ...$
     llvm::errs() << "Hi!\n";
-    for(auto item : data.sharing_feedback) {
+    
+    for(auto item : data.sharing_feedback.sharing_init) {
       item.print();
     }
-
+    
     ResourceSharing sharing;
     sharing.place_data(data.sharing_feedback);
+    sharing.place_BB(data.archs);
     sharing.print();
-
+    sharing.find_strongly_connected_components();
+    
     if (data.someCountOfSomething >= 20) {
       llvm::errs() << "Breaking out of the loop!\n";
       break;
     }
-    
   }
 }
 
