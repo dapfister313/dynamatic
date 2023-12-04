@@ -48,21 +48,29 @@ struct PlacementResult {
 
 //stores/transfers information needed for resource sharing
 struct ResourceSharingInfo {
-  mlir::Operation* op; 
-  double occupancy; 
-  double op_latency;
-  double throughput;
-
-  void print() {
-    llvm::errs() << "Operation " << op 
-                 << ", occupancy: " << occupancy 
-                 << ", latency: " << op_latency 
-                 << ", throughput: " << throughput 
-                 << "\n";
-  }
   
+  // for each CFDFC, store the throughput in double format to 
+  // double format to compare 
+  std::map<int, double> sharing_check{};
+  
+  //store stats of each operation
+  struct OpSpecific {
+    mlir::Operation* op; 
+    double occupancy; 
+    double op_latency;
+    //double throughput;
+
+    void print() {
+      llvm::errs() << "Operation " << op 
+                  << ", occupancy: " << occupancy 
+                  << ", latency: " << op_latency 
+                  << "\n";
+    }
+  };
+  std::vector<OpSpecific> sharing_init;
+
   //constructor
-  ResourceSharingInfo() : op(nullptr), occupancy(-1), op_latency(-1), throughput(-1) {}
+  ResourceSharingInfo() = default;
 };
 
 /// Helper datatype for buffer placement. Simply aggregates all the information
@@ -77,7 +85,7 @@ struct FuncInfo {
   /// should be optimized.
   llvm::MapVector<CFDFC *, bool> cfdfcs;
   //vector used to transfer important resource sharing parameters
-  std::vector<ResourceSharingInfo> sharing_info;
+  ResourceSharingInfo sharing_info;
 
   /// Argument-less constructor so that we can use the struct as a value type
   /// for maps.
@@ -237,3 +245,4 @@ T &operator<<(T &os,
 #endif // DYNAMATIC_GUROBI_NOT_INSTALLED
 
 #endif // DYNAMATIC_TRANSFORMS_BUFFERPLACEMENT_BUFFERPLACEMENTMILP_H
+
