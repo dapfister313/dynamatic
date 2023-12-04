@@ -599,24 +599,29 @@ void FPGA20Buffers::logResults(DenseMap<Value, PlacementResult> &placement) {
 
   (*occupancyLogger) << "cfdfc,name,occupancy\n";
   
-  std::vector<Op_stats> occupancy_info;
+  //std::vector<Op_stats> occupancy_info;
   // Log token occupancy of all (pipelined) units in all CFDFCs
-  ResourceSharingInfo sharing_info;
+  ResourceSharingInfo::OpSpecific sharing_item;
+  double throughput;
   for (auto [idx, cfdfcWithVars] : llvm::enumerate(vars.cfdfcs)) {
     auto [cf, cfVars] = cfdfcWithVars;
     (*occupancyLogger) << "Per-unit occupancy of CFDFC #" << idx << ":\n";
     // for each CFDFC, extract the throughput in double format
-    sharing_info.throughput = cfVars.throughput.get(GRB_DoubleAttr_X);
+    throughput = cfVars.throughput.get(GRB_DoubleAttr_X);
+    funcInfo.sharing_info.sharing_check[idx] = throughput;
+    
     for (auto &[op, unitVars] : cfVars.units) {
-      sharing_info.op = op;
-      if (failed(timingDB.getLatency(op, sharing_info.op_latency)) || sharing_info.op_latency == 0.0)
+      sharing_item.op = op;
+      if (failed(timingDB.getLatency(op, sharing_item.op_latency)) || sharing_item.op_latency == 0.0)
         continue;
       // the occupancy of the unit is calculated as the product between
       // throughput and latency
-      sharing_info.occupancy = sharing_info.op_latency * sharing_info.throughput;
-      funcInfo.sharing_info.push_back(sharing_info);
-      (*occupancyLogger) << nameUniquer.getName(*sharing_info.op).str() << ": " << sharing_info.occupancy << "\n";
+      sharing_item.occupancy = sharing_item.op_latency * throughput;
+      funcInfo.sharing_info.sharing_init.push_back(sharing_item);
+      (*occupancyLogger) << nameUniquer.getName(*sharing_item.op).str() << ": " << sharing_item.occupancy << "\n";
+
     }
+    llvm::errs() << "Hi: " << nameUniquer.getName(*sharing_item.op).str() << ": " << sharing_item.occupancy << "\n";
   }
 }
 #endif // DYNAMATIC_GUROBI_NOT_INSTALLED
