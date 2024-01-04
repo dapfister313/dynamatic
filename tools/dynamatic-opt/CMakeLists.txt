@@ -19,6 +19,7 @@ target_link_libraries(dynamatic-opt
   DynamaticExperimentalTestTransforms
   DynamaticExperimentalSupport
   DynamaticExperimentalTransforms
+  DynamaticTutorialsMyCreatingPasses
 
   CIRCTHandshake
   CIRCTHandshakeTransforms

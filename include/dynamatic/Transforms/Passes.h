@@ -19,6 +19,7 @@
 #include "dynamatic/Transforms/BufferPlacement/HandshakeIterativeBuffers.h"
 #include "dynamatic/Transforms/BufferPlacement/HandshakePlaceBuffers.h"
 #include "dynamatic/Transforms/BufferPlacement/HandshakeSetBufferingProperties.h"
+#include "dynamatic/Transforms/ResourceSharing/FCCM22Sharing.h"
 #include "dynamatic/Transforms/FlattenMemRefRowMajor.h"
 #include "dynamatic/Transforms/HandshakeCanonicalize.h"
 #include "dynamatic/Transforms/HandshakeConcretizeIndexType.h"

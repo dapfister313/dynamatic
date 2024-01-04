@@ -254,6 +254,22 @@ def HandshakeIterativeBuffers : Pass<"handshake-iterative-buffers",
 }
 
 //===----------------------------------------------------------------------===//
+// Resource sharing passes
+//===----------------------------------------------------------------------===//
+
+def ResourceSharingFCCM22 : Pass<"sharing-FCCM22", "mlir::ModuleOp"> {
+  let summary = "Merge sharable operations";
+  let description = [{
+    Performs two separate steps.
+    Step 1: Detects which operations of the same type can be merged with no to little 
+            performance overhead
+    Step 2: Merges distinctive depictive operations to use one physical operation per 
+            predefined clusters.
+  }];
+  let constructor = "dynamatic::sharing::createResourceSharingFCCM22Pass()";
+}
+
+//===----------------------------------------------------------------------===//
 // Other passes
 //===----------------------------------------------------------------------===//
 
