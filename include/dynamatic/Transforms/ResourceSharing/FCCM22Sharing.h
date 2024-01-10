@@ -24,7 +24,11 @@ namespace sharing {
 #include "dynamatic/Transforms/Passes.h.inc"
 
 std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>>
-createResourceSharingFCCM22Pass();
+createResourceSharingFCCM22Pass(StringRef algorithm = "fpga20",
+                                StringRef frequencies = "",
+                                StringRef timingModels = "",
+                                bool firstCFDFC = false, double targetCP = 4.0,
+                                unsigned timeout = 180, bool dumpLogs = false);
 
 } // namespace sharing
 } // namespace dynamatic

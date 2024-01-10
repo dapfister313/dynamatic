@@ -29,6 +29,10 @@
 #include "mlir/Support/LLVM.h"
 #include "llvm/ADT/MapVector.h"
 
+#include "mlir/IR/Block.h"
+#include "mlir/IR/Operation.h"
+#include "dynamatic/Support/LogicBB.h"
+
 #ifndef DYNAMATIC_GUROBI_NOT_INSTALLED
 #include "gurobi_c++.h"
 namespace dynamatic {
@@ -64,6 +68,7 @@ struct ResourceSharingInfo {
       llvm::errs() << "Operation " << op 
                   << ", occupancy: " << occupancy 
                   << ", latency: " << op_latency 
+                  << ", block: " << getLogicBB(op)
                   << "\n";
     }
   };

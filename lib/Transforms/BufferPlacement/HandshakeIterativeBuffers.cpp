@@ -22,6 +22,7 @@
 #include <cmath>
 #include <list>
 #include <map>
+#include <unordered_set>
 
 using namespace llvm::sys;
 using namespace circt;
@@ -33,137 +34,6 @@ using namespace dynamatic::experimental;
 
 
 namespace {
-/*
-struct OpIdentifier {
-  std::map<llvm::StringRef, mlir::Operation*> bridge{};
-  OpIdentifier(ModuleOp modOp) {
-    for (mlir::Region &region : modOp->getRegions()) {
-      for (mlir::Block &block : region.getBlocks()) {
-        block.walk([&](mlir::Operation *op) {
-          bridge[op->getName().getStringRef()] = op;
-        });
-      }
-    }
-  }
-};
-
-struct OpItem {
-  mlir::Operation* op; 
-  std::string op_str; 
-  double occupancy; 
-  double op_latency;
-  double throughput;
-  int cfdfc_id;
-  
-  bool get_op(OpIdentifier matching) { 
-    auto id = matching.bridge.find(op_str);
-    if(id != matching.bridge.end()) {
-      op = id->second;
-    }
-    return 0;
-  }
-
-  void print_OpItem() {
-    llvm::errs() << "Op:" << op_str << "\n";
-    llvm::errs() << "occupancy:" << occupancy << "\n";
-    llvm::errs() << "op_latency:" << op_latency << "\n";
-    llvm::errs() << "throughput:" << throughput << "\n";
-    llvm::errs() << "cfdfc_id:" << cfdfc_id << "\n";
-  }
-};
-
-
-
-struct Group {
-  std::vector<mlir::Operation*> items;
-  double shared_occupancy;
-  int cfdfc_id;
-
-  //Constructors
-  Group(mlir::Operation* op, double occupancy, int cfdfc_id)
-        : shared_occupancy(occupancy), cfdfc_id(cfdfc_id) {
-          items.push_back(op);
-        }
-  Group(OpItem item)
-        : shared_occupancy(item.occupancy),  cfdfc_id(item.cfdfc_id) {
-          items.push_back(item.op);
-        }
-
-
-  //Destructor
-  ~Group() {};
-};
-
-struct Set {
-  std::list<Group> groups{};
-  double op_latency;
-  llvm::StringRef identifier;
-  bool modified;
-
-  Set(OpItem item)
-        : op_latency(item.op_latency), identifier(item.op->getName().getStringRef()),
-          modified(true) {
-            groups.push_front(Group(item));
-          }
-  
-  int try_grouping(Group *elem1, Group *elem2) {
-    if(elem1->cfdfc_id == elem2->cfdfc_id) {
-      //belong to the same cfdfc loop
-      if(elem1->shared_occupancy + elem2->shared_occupancy <= op_latency) {
-        //join groups
-      }
-    }
-  }
-
-  int join_groups(std::list<Group> groups) {
-    for(std::list<Group>::iterator outer_it = groups.begin(); outer_it != groups.end(); ++outer_it) {
-      for(std::list<Group>::iterator inner_it = outer_it + 1; inner_it != groups.end(); ++inner_it) {
-
-      }
-    }
-  }
-  
-};
-
-class ResourceSharing {
-  std::vector<Set> sets{};
-  std::map<llvm::StringRef, int> set_selector;
-  int number_of_sets;
-
-  int get_id(mlir::Operation *op) {
-    auto id = set_selector.find(op->getName().getStringRef());
-    if(id == set_selector.end()) {
-      return -1;
-    }
-    return id->second;
-  }
-
-  void set_id(mlir::Operation *op) {
-    set_selector[op->getName().getStringRef()] = number_of_sets;
-  }
-
-public:
-  
-  void add_operation(OpItem item) {
-    int id = get_id(item.op);
-    if(id != -1) {
-      //set already exists
-      sets[id].groups.push_front(Group(item));
-    } else {
-      //create set
-      sets.push_back(Set(item));
-      set_id(item.op);
-    }
-  }
-
-  void print_setup() {
-    for(auto set : sets) {
-      llvm::errs() << "Placeholder\n";
-    }
-  }
-  
-};
-*/
 
 /*
        Inside each set of strongly connected components
@@ -194,6 +64,7 @@ struct Group {
 */
 struct Set {
   std::list<Group> groups{};
+  int SCC_id;
   double op_latency;
 
   void addGroup(Group group) {
@@ -246,10 +117,8 @@ struct OpSelector {
   }
 
   //Constructor
-  OpSelector(double latency, llvm::StringRef identifier, Group entry)
-        : op_latency(latency), identifier(identifier) {
-          sets.push_back(Set(entry));
-        }
+  OpSelector(double latency, llvm::StringRef identifier)
+        : op_latency(latency), identifier(identifier) {}
 
 };
 
@@ -261,7 +130,8 @@ class ResourceSharing {
   std::vector<OpSelector> operation_type{};
   std::map<int, double> throughput;
   SmallVector<experimental::ArchBB> archs;
-  //std::map<llvm::StringRef, int> op_selector; //could be used to eaily determine the operation if there are a lot
+  std::map<llvm::StringRef, int> OpNames;
+  int number_of_operation_types;
   
   double runPerformanceAnalysis() {
     return 0;
@@ -269,23 +139,40 @@ class ResourceSharing {
 
 public:
   //place resource sharing data retrieved from buffer placement
-  void place_data(ResourceSharingInfo sharing_feedback) {
-    for(auto sharing_item : sharing_feedback.sharing_init) {
-      llvm::StringRef OpName = sharing_item.op->getName().getStringRef();
-      Group item = Group(sharing_item.op, sharing_item.occupancy);
-      int loc = -1;
-      for(unsigned long i = 0; i < operation_type.size(); i++) {
-        if(OpName == operation_type[i].identifier) {
-          loc = i;
-          break;
-        }
-      }
-      
-      if(loc == -1) {
-        operation_type.push_back(OpSelector(sharing_item.op_latency, OpName, item));
+  void place_data(ResourceSharingInfo sharing_feedback, std::vector<int>& SCC, int number_of_SCC, TimingDatabase timingDB) {
+    //Take biggest occupancy per operation
+    std::unordered_map<mlir::Operation*, std::pair<double,double>> data_mod;
+    for(auto item : sharing_feedback.sharing_init) {
+      if (data_mod.find(item.op) != data_mod.end()) {
+        data_mod[item.op].first = std::max(item.occupancy, data_mod[item.op].first);
       } else {
-        operation_type[loc].sets[0].groups.push_front(item);
+        data_mod[item.op] = std::make_pair(item.occupancy, item.op_latency);
       }
+    }
+
+    //everytime we place/overwrite data, initial number of operation types is 0;
+    number_of_operation_types = 0;
+
+    //iterate through all retrieved operations
+    for(auto sharing_item : data_mod) {
+      double latency;
+      if (failed(timingDB.getLatency(sharing_item.first, latency)))
+        latency = 0.0;
+      llvm::errs() << "Latency of unit " << sharing_item.first << ": " << latency << "\n";
+      llvm::StringRef OpName = sharing_item.first->getName().getStringRef();
+      Group group_item = Group(sharing_item.first, sharing_item.second.first);
+      unsigned int BB = getLogicBB(sharing_item.first).value();
+      int OpIdx = -1;
+      auto item = OpNames.find(OpName);
+      if(item != OpNames.end()) {
+        OpIdx = item->second;
+      } else {
+        OpNames[OpName] = number_of_operation_types;
+        OpIdx = number_of_operation_types;
+        ++number_of_operation_types;
+        operation_type.push_back(OpSelector(sharing_item.second.second, OpName));
+      }
+      operation_type[BB].sets;
     }
     throughput = sharing_feedback.sharing_check;
   }
@@ -310,7 +197,7 @@ public:
     return b;
   }
 
-  void find_strongly_connected_components() {
+  int find_strongly_connected_components(std::vector<int>& SCC) {
     int BBs = 0;
     for(auto arch_item : archs) {
       BBs = max(BBs, arch_item.srcBB);
@@ -353,12 +240,11 @@ public:
         taken = false;
       }
     }
-    llvm::errs() << "\nDifferent Sets: \n";
     for(int i = 0; i < BBs; i++) {
-      llvm::errs() << Sets[i] << ", ";
+      SCC[i] = Sets[i] - 1;
     }
     llvm::errs() << "\n\n";
-    return;
+    return position - 1;
   }
   
   void print() {
@@ -384,38 +270,6 @@ public:
   }
 };
 
-/// Stores some data you may want to extract from buffer placement
-struct MyData {
-  //extracts needed resource sharing data from FuncInfo struct
-  ResourceSharingInfo sharing_feedback; 
-  SmallVector<experimental::ArchBB> archs;
-  unsigned someCountOfSomething = 0;
-  unsigned totalNumberOfOpaqueBuffers = 0;
-};
-
-/// Sub-type of the classic buffer placement pass, just so that we can override
-/// some of the methods used during buffer placement and extract internal data
-/// (e.g., channel throughputs as determined by the MILP) from the pass.
-struct MyBufferPlacementPass : public HandshakePlaceBuffersPass {
-  MyBufferPlacementPass(MyData &data, StringRef algorithm,
-                        StringRef frequencies, StringRef timingModels,
-                        bool firstCFDFC, double targetCP, unsigned timeout,
-                        bool dumpLogs)
-      : HandshakePlaceBuffersPass(algorithm, frequencies, timingModels,
-                                  firstCFDFC, targetCP, timeout, dumpLogs),
-        data(data){};
-
-  /// Some data you care about extracting.
-  MyData &data;
-
-protected:
-  /// Custom buffer placement step. Copied from `HandshakePlaceBuffersPass` with
-  /// the addition of a step at the end to extract some information from the
-  /// MILP.
-  LogicalResult
-  getBufferPlacement(FuncInfo &info, TimingDatabase &timingDB, Logger *logger,
-                     DenseMap<Value, PlacementResult> &placement) override;
-};
 } // namespace
 
 LogicalResult MyBufferPlacementPass::getBufferPlacement(
@@ -467,11 +321,6 @@ LogicalResult MyBufferPlacementPass::getBufferPlacement(
 
   data.sharing_feedback = info.sharing_info;
   data.archs = info.archs;
-  /*
-  for(auto arch_item : info.archs) {
-    llvm::errs() << "Source: " << arch_item.srcBB << ", Destination: " << arch_item.dstBB << "\n";
-  }
-  */
   data.someCountOfSomething += 10;
   delete milp;
   return res;
@@ -506,57 +355,6 @@ struct HandshakeIterativeBuffersPass
 };
 } // namespace
 
-/*
-std::vector<std::vector<Op_stats>> approx_join(std::vector<Op_stats> information) {
-  std::vector<std::vector<Op_stats>> result;
-  std::vector<double> capacity;
-  bool taken;
-  for(auto opT : information) {
-    taken = 0;
-    double temp = 1/opT.occupancy;
-    for(unsigned long i = 0; i < capacity.size(); ++i) {
-      if(capacity[i] + temp <= 1) {
-        capacity[i] += temp;
-        result[i].push_back(opT);
-        taken = 1;
-        break;
-      }
-    }
-    if(!taken) {
-       int lat = result.size();
-       result.resize(lat+1);
-       capacity.push_back(temp);
-       result[lat].push_back(opT);
-    }
-  }
-  return result;
-}
-
-
-std::vector<std::vector<Op_stats>> recursive_join(
-            std::vector<Op_stats> information, 
-            std::vector<std::vector<Op_stats>> result,
-            int max_slots, int depth, int max_depth) {
-    if(depth == max_depth) {
-      return result;
-    }
-
-    return result;
-}
-
-std::vector<std::vector<Op_stats>> best_join(std::vector<Op_stats> information) {
-  double comp_max_slots = 0;
-  for(auto opT : information) {
-    comp_max_slots += 1/opT.occupancy;
-  }
-  int max_slots = 2*ceil(comp_max_slots);
-  std::vector<std::vector<Op_stats>> result(max_slots);
-  std::vector<double> capacity;
-  return result;
-}
-*/
-
-
 void HandshakeIterativeBuffersPass::runOnOperation() {
   ModuleOp modOp = getOperation();
   MyData data;
@@ -577,20 +375,50 @@ void HandshakeIterativeBuffersPass::runOnOperation() {
     //   want
     // - break out of the loop
     // - ...$
-    llvm::errs() << "Hi!\n";
+    llvm::errs() << "Initally:\n";
     
     for(auto item : data.sharing_feedback.sharing_init) {
       item.print();
     }
+
+    llvm::errs() << "\nAfter modification:\n";
+    
+    std::unordered_map<mlir::Operation*, double> data_mod;
+    for(auto item : data.sharing_feedback.sharing_init) {
+      if (data_mod.find(item.op) != data_mod.end()) {
+        data_mod[item.op] = std::max(item.occupancy, data_mod[item.op]);
+      } else {
+        data_mod[item.op] = item.occupancy;
+      }
+    }
+
+    for(auto item : data_mod) {
+      llvm::errs() << "Operation " << item.first 
+                   << ", occupancy: " << item.second 
+                   << "block number: " << getLogicBB(item.first)
+                   << "\n";
+    }
     
     ResourceSharing sharing;
-    sharing.place_data(data.sharing_feedback);
     sharing.place_BB(data.archs);
+
+    //finding strongly connected components
+    int number_of_basic_blocks = 7;
+    std::vector<int> SCC(number_of_basic_blocks);
+    int number_of_SCC = sharing.find_strongly_connected_components(SCC);
+    llvm::errs() << "Number of strongly connected components: " << number_of_SCC << "\n";
+    for(int i = 0; i < number_of_basic_blocks; i++) {
+      llvm::errs() << SCC[i] << ", ";
+    }
+    llvm::errs() << "\n";
+    TimingDatabase timingDB(&getContext());
+    if (failed(TimingDatabase::readFromJSON(timingModels, timingDB)))
+      return signalPassFailure();
+    //sharing.place_data(data.sharing_feedback, SCC, number_of_SCC, timingDB);
     sharing.print();
-    sharing.find_strongly_connected_components();
     
     if (data.someCountOfSomething >= 20) {
-      llvm::errs() << "Breaking out of the loop!\n";
+      llvm::errs() << "\nBreaking out of the loop!\n";
       break;
     }
   }
