@@ -5,6 +5,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "dynamatic/Transforms/ResourceSharing/FCCM22Sharing.h"
+#include "dynamatic/Transforms/ResourceSharing/SCC.h"
 #include "dynamatic/Transforms/BufferPlacement/FPGA20Buffers.h"
 #include "dynamatic/Transforms/BufferPlacement/HandshakeIterativeBuffers.h"
 #include "circt/Dialect/Handshake/HandshakeOps.h"
@@ -238,8 +239,13 @@ public:
     throughput = sharing_feedback.sharing_check;
   }
 
-  void place_BB(SmallVector<experimental::ArchBB> archs_ext) {
+  int place_BB(SmallVector<experimental::ArchBB> archs_ext) {
     archs = archs_ext;
+    unsigned int maximum = 0;
+    for(auto arch_item : archs) {
+      maximum = std::max(maximum, std::max(arch_item.srcBB, arch_item.dstBB));
+    }
+    return maximum + 1; //as we have BB0, we need to add one at the end
   }
   
   void recursiveDFS(unsigned int starting_node, std::vector<bool> &visited) {
@@ -306,6 +312,10 @@ public:
     }
     llvm::errs() << "\n\n";
     return position - 1;
+  }
+
+  std::vector<int> performSCC_bbl() {
+    return Kosarajus_algorithm_BBL(archs);
   }
   
   void print() {
@@ -431,12 +441,7 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
       return signalPassFailure();
     }
 
-    // At this point modOp is buffered. Now you can:
-    // - further modify the module by applying any kind of transformation you
-    //   want
-    // - break out of the loop
-    // - ...$
-    llvm::errs() << "Initally:\n";
+    llvm::errs() << "\nInitally:\n";
     
     for(auto item : data.sharing_feedback.sharing_init) {
       item.print();
@@ -461,17 +466,17 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
     }
     
     ResourceSharing sharing;
-    sharing.place_BB(data.archs);
+    int number_of_basic_blocks = sharing.place_BB(data.archs);
 
-    //finding strongly connected components
-    int number_of_basic_blocks = 7;
-    std::vector<int> SCC(number_of_basic_blocks);
-    int number_of_SCC = sharing.find_strongly_connected_components(SCC);
-    llvm::errs() << "Number of strongly connected components: " << number_of_SCC << "\n";
+    //perform SCC computation
+    llvm::errs() << "\nSCC distribution: ";
+    std::vector<int> SCC = sharing.performSCC_bbl();
+    int number_of_SCC = SCC.size();
     for(int i = 0; i < number_of_basic_blocks; i++) {
       llvm::errs() << SCC[i] << ", ";
     }
-    llvm::errs() << "\n";
+    llvm::errs() << "\n\n";
+
     TimingDatabase timingDB(&getContext());
     if (failed(TimingDatabase::readFromJSON(timingModels, timingDB)))
       return signalPassFailure();
