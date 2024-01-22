@@ -1,6 +1,7 @@
 add_dynamatic_library(DynamaticTutorialsMyCreatingPasses
   FCCM22Sharing.cpp
   SCC.cpp
+  modIR.cpp
 
   DEPENDS
 

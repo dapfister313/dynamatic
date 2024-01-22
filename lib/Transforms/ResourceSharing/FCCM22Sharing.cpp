@@ -6,10 +6,12 @@
 
 #include "dynamatic/Transforms/ResourceSharing/FCCM22Sharing.h"
 #include "dynamatic/Transforms/ResourceSharing/SCC.h"
+#include "dynamatic/Transforms/ResourceSharing/modIR.h"
 #include "dynamatic/Transforms/BufferPlacement/FPGA20Buffers.h"
 #include "dynamatic/Transforms/BufferPlacement/HandshakeIterativeBuffers.h"
 #include "circt/Dialect/Handshake/HandshakeOps.h"
 #include "mlir/IR/MLIRContext.h"
+#include "dynamatic/Support/LogicBB.h"
 
 using namespace mlir;
 using namespace circt;
@@ -31,6 +33,38 @@ using namespace circt;
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Support/IndentedOstream.h"
 #include <string>
+#include "circt/Conversion/StandardToHandshake.h"
+#include "circt/Dialect/Handshake/HandshakeOps.h"
+#include "circt/Dialect/Handshake/HandshakePasses.h"
+#include "circt/Dialect/Pipeline/Pipeline.h"
+#include "circt/Support/BackedgeBuilder.h"
+#include "mlir/Analysis/CFGLoopInfo.h"
+#include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
+#include "mlir/Dialect/Affine/Analysis/AffineAnalysis.h"
+#include "mlir/Dialect/Affine/Analysis/AffineStructures.h"
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Affine/IR/AffineValueMap.h"
+#include "mlir/Dialect/Affine/Utils.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Diagnostics.h"
+#include "mlir/IR/Dominance.h"
+#include "mlir/IR/OpImplementation.h"
+#include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/Types.h"
+#include "mlir/IR/Value.h"
+#include "mlir/Pass/Pass.h"
+#include "mlir/Support/LLVM.h"
+#include "mlir/Transforms/DialectConversion.h"
+#include "mlir/Transforms/Passes.h"
+#include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace llvm::sys;
 using namespace circt;
@@ -40,7 +74,25 @@ using namespace dynamatic;
 using namespace dynamatic::buffer;
 using namespace dynamatic::experimental;
 
+//std::max
+#include <algorithm>
+
 namespace {
+
+std::optional<unsigned> getLogicBB(Operation *op) {
+  if (auto bb = op->getAttrOfType<mlir::IntegerAttr>(BB_ATTR))
+    return bb.getUInt();
+  return {};
+}
+
+static void replaceFirstUse(Operation *op, Value oldVal, Value newVal) {
+  for (int i = 0, e = op->getNumOperands(); i < e; ++i)
+    if (op->getOperand(i) == oldVal) {
+      op->setOperand(i, newVal);
+      break;
+    }
+  return;
+}
 
 /// Recovered data needed for performing resource sharing
 struct ResourceSharing_Data {
@@ -247,7 +299,7 @@ public:
     }
     return maximum + 1; //as we have BB0, we need to add one at the end
   }
-  
+  /*
   void recursiveDFS(unsigned int starting_node, std::vector<bool> &visited) {
     visited[starting_node] = true;
     for(auto arch_item : archs) {
@@ -263,7 +315,7 @@ public:
     }
     return b;
   }
-
+  
   int find_strongly_connected_components(std::vector<int>& SCC) {
     int BBs = 0;
     for(auto arch_item : archs) {
@@ -313,6 +365,7 @@ public:
     llvm::errs() << "\n\n";
     return position - 1;
   }
+  */
 
   std::vector<int> performSCC_bbl() {
     return Kosarajus_algorithm_BBL(archs);
@@ -377,9 +430,42 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   }
   //std::vector<Op_stats> occupancy_info; //!!!!!
   // Walkin' in the IR:
+  
+  //value after start is "info.funcOp->getArguments().back()"
+  /*
+  for(auto result : info.funcOp->getArguments().back()) {
+    llvm::errs() << "Argument: " << result << "\n";
+  }
+  */
+  // If we are in the entry block, we can use the start input of the
+  // function (last argument) as our control value
+  assert(info.funcOp.getArguments().back().getType().isa<NoneType>() &&
+          "expected last function argument to be a NoneType");
+  llvm::errs() << "Argument: " << info.funcOp.getArguments().back() << "\n";
+  
+  /*
+  unsigned int number_of_basic_blocks = 0;
+  for(auto arch_item : info.archs) {
+    number_of_basic_blocks = std::max(number_of_basic_blocks, std::max(arch_item.srcBB, arch_item.dstBB));
+  }
+  ++number_of_basic_blocks;
+
+  llvm::errs() << "Number of basic blocks: " << number_of_basic_blocks << "\n";
+  */
+
+  SmallVector<mlir::Block *> logicBBconversion;
+  int currentHighestBB = -1;
   llvm::errs() << "Walkin' inside the IR:\n";
   for (Operation &op : info.funcOp.getOps()) {
     llvm::errs() << "Operation" << op << "\n";
+    std::optional<unsigned> brBB = getLogicBB(&op);
+    if(brBB) {
+      if((unsigned)(currentHighestBB + 1) == brBB.value()) {
+        logicBBconversion.push_back(&op.getParentRegion()->getBlocks().front());
+        ++currentHighestBB;
+      }
+      //llvm::errs() << "Logic BB: " << brBB.value() << "\n";
+    }
   }
 
   // Here, before destroying the MILP, extract whatever information you want
@@ -392,12 +478,214 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
 
   data.sharing_feedback = info.sharing_info;
   data.archs = info.archs;
+  
   /*
   for(auto arch_item : info.archs) {
     llvm::errs() << "Source: " << arch_item.srcBB << ", Destination: " << arch_item.dstBB << "\n";
   }
   */
-  data.someCountOfSomething += 10;
+  
+  /*
+  OpBuilder builder(&getContext());
+  llvm::errs() << "Test!" << "\n";
+  std::vector<circt::handshake::ForkOp *> delete_vector;
+  int break_point = 0;
+
+  for (auto forkToReplace :
+      llvm::make_early_inc_range(info.funcOp.getOps<ForkOp>())) {
+    if(break_point == 3) {
+      llvm::errs() << forkToReplace << "\n";
+      Operation *opSrc = forkToReplace.getOperand().getDefiningOp();
+      Value opSrcIn = forkToReplace.getOperand();
+      std::vector<Operation *> opsToProcess;
+      for (auto &u : forkToReplace.getResults().getUses())
+        opsToProcess.push_back(u.getOwner());
+    
+      // Insert fork after op
+      builder.setInsertionPointAfter(opSrc);
+      auto forkSize = opsToProcess.size();
+      llvm::errs() << "Fork Size: " << forkSize << "************************************\n";
+      
+      auto newForkOp = builder.create<ForkOp>(opSrcIn.getLoc(), opSrcIn, forkSize + 1);
+      inheritBB(opSrc, newForkOp);
+      for (int i = 0, e = forkSize; i < e; ++i)
+        opsToProcess[i]->replaceUsesOfWith(forkToReplace->getResult(i), newForkOp->getResult(i));
+      auto newSinkOp = builder.create<SinkOp>(newForkOp->getResult(forkSize).getLoc(), newForkOp->getResult(forkSize));
+      forkToReplace.erase();
+      
+      break;
+    }
+    ++break_point;
+  }
+  */
+  /*
+  OpBuilder builder(&getContext());
+  llvm::errs() << "Test!" << "\n";
+  int break_point = 0;
+  for (auto forkToReplace :
+      llvm::make_early_inc_range(info.funcOp.getOps<ForkOp>())) {
+        if(break_point) {
+          llvm::errs() << "Fork: " << forkToReplace << "\n";
+          Operation *opSrc = forkToReplace.getOperand().getDefiningOp();
+          Value opSrcIn = forkToReplace.getOperand();
+          std::vector<Operation *> opsToProcess;
+          for (auto &u : forkToReplace.getResults().getUses())
+            opsToProcess.push_back(u.getOwner());
+        
+          // Insert fork after op
+          builder.setInsertionPointAfter(opSrc);
+          auto forkSize = opsToProcess.size();
+          llvm::errs() << "Fork Size: " << forkSize << "************************************\n";
+          
+          auto newForkOp = builder.create<ForkOp>(opSrcIn.getLoc(), opSrcIn, forkSize + 2);
+          inheritBB(opSrc, newForkOp);
+          for (int i = 0, e = forkSize; i < e; ++i)
+            opsToProcess[i]->replaceUsesOfWith(forkToReplace->getResult(i), newForkOp->getResult(i));
+          Value condValue = newForkOp->getResult(forkSize); //newForkOp.getOperand(); //dyn_cast<mlir::cf::CondBranchOp>(newForkOp).getCondition();
+          llvm::errs() << "Resulted value: " << condValue << "\n";
+          llvm::errs() << "Previous value: " << forkToReplace->getResult(forkSize-1) << "\n";
+          auto newCbranch = builder.create<ConditionalBranchOp>(newForkOp->getResult(forkSize).getLoc(), newForkOp->getResult(forkSize), newForkOp->getResult(forkSize + 1));
+          //auto newSinkOp = builder.create<SinkOp>(newForkOp_red->getResult(0).getLoc(), newForkOp_red->getResult(0));
+          for(int i = 0; i < 2; i++) {
+            auto newSinkOp = builder.create<SinkOp>(newCbranch->getResult(i).getLoc(), newCbranch->getResult(i));
+          }
+          forkToReplace.erase();
+          break;
+        }
+        break_point++;
+  }
+  */
+  /*
+  OpBuilder builder(&getContext());
+  for (auto cmpi_to_add : llvm::make_early_inc_range(info.funcOp.getOps<arith::CmpIOp>())) {
+    Operation *opSrc = cmpi_to_add;
+    Operation *opDst = cmpi_to_add->getNextNode();
+    builder.setInsertionPointAfter(opSrc);
+
+    Value bufferIn = opDst->getOperand(0);
+    auto placeBuffer = [&](BufferTypeEnum bufType, unsigned numSlots) {
+      if (numSlots == 0)
+        return;
+
+      // Insert an opaque buffer
+      auto bufOp = builder.create<handshake::BufferOp>(
+          bufferIn.getLoc(), bufferIn, numSlots, bufType);
+      inheritBB(opSrc, bufOp);
+      Value bufferRes = bufOp.getResult();
+
+      opDst->replaceUsesOfWith(bufferIn, bufferRes);
+      bufferIn = bufferRes;
+    };
+    break;
+  };
+  */
+  
+  /*
+  OpBuilder builder(&getContext());
+  llvm::errs() << "Test!" << "\n";
+  int break_point = 0;
+  for (auto cmpi_to_add : llvm::make_early_inc_range(info.funcOp.getOps<arith::CmpIOp>())) {
+    Operation *opSrc = cmpi_to_add;
+    builder.setInsertionPointAfter(opSrc);
+    llvm::errs() << "Operation source: " << opSrc->getName().getStringRef() << "\n";
+    Operation *opDst = cmpi_to_add->getNextNode();
+    llvm::errs() << "Operation destination: " << opDst->getName().getStringRef() << "\n";
+    Value opDstOut = opDst->getOperand(0);
+    Value opSrcIn = opSrc->getResult(0);
+    auto newForkOp = builder.create<ForkOp>(opSrcIn.getLoc(), opSrcIn, 3);
+    inheritBB(cmpi_to_add, newForkOp);
+    Value OpRes = newForkOp->getResult(0);
+    opDst->replaceUsesOfWith(opDstOut, OpRes);
+    //auto newSrc = builder.create<SourceOp>(...);
+    auto newCbranch = builder.create<ConditionalBranchOp>(newForkOp->getResult(1).getLoc(), newForkOp->getResult(1), newForkOp->getResult(2));
+    for(int i = 0; i < 2; i++) {
+      auto newSinkOp = builder.create<SinkOp>(newCbranch->getResult(i).getLoc(), newCbranch->getResult(i));
+    }
+    break;
+  }
+  */
+  /*
+  //perform merge
+  OpBuilder builder(&getContext());
+  for (auto forkToReplace :
+      llvm::make_early_inc_range(info.funcOp.getOps<ForkOp>())) {
+
+      llvm::errs() << forkToReplace << "\n";
+      Operation *opSrc = forkToReplace.getOperand().getDefiningOp();
+      Value opSrcIn = forkToReplace.getOperand();
+      std::vector<Operation *> opsToProcess;
+      for (auto &u : forkToReplace.getResults().getUses())
+        opsToProcess.push_back(u.getOwner());
+    
+      // Insert fork after op
+      builder.setInsertionPointAfter(opSrc);
+      auto forkSize = opsToProcess.size();
+      
+      auto newForkOp = builder.create<ForkOp>(opSrcIn.getLoc(), opSrcIn, forkSize + 1);
+      inheritBB(opSrc, newForkOp);
+      for (int i = 0, e = forkSize; i < e; ++i)
+        opsToProcess[i]->replaceUsesOfWith(forkToReplace->getResult(i), newForkOp->getResult(i));
+      
+      auto newSourceOp = builder.create<handshake::SourceOp>(newForkOp.getLoc(), builder.getNoneType());
+      IntegerAttr cond = builder.getBoolAttr(true);
+      auto newConstOp = builder.create<handshake::ConstantOp>(newSourceOp.getLoc(), cond.getType(), cond, newSourceOp);
+      auto newConstOp_2 = builder.create<handshake::ConstantOp>(newForkOp->getResult(forkSize).getLoc(), cond.getType(), cond, newForkOp->getResult(forkSize));
+      auto newCbranch = builder.create<ConditionalBranchOp>(newConstOp_2.getLoc(), newConstOp_2, newConstOp);
+      inheritBB(opSrc, newCbranch);
+      SmallVector<Value> ForkOpS;
+      for(int i = 0; i < 2; i++) {
+        auto newForkOp2 = builder.create<ForkOp>(newCbranch->getResult(i).getLoc(), newCbranch->getResult(i), 1);
+        ForkOpS.push_back(newForkOp2->getResult(0));
+      }
+      //MergeOp: create merge here! 
+      auto newMergeOp = builder.create<handshake::MergeOp>(ForkOpS[0].getLoc(), ForkOpS);
+
+      auto newSourceOp2 = builder.create<handshake::SourceOp>(newForkOp.getLoc(), builder.getNoneType());
+      //auto newConstOp3 = builder.create<handshake::ConstantOp>(newSourceOp2.getLoc(), cond.getType(), cond, newSourceOp2);
+      auto newSourceOp3 = builder.create<handshake::SourceOp>(newForkOp.getLoc(), builder.getNoneType());
+      IntegerAttr cond2 = builder.getBoolAttr(false);
+      auto newConstOp4 = builder.create<handshake::ConstantOp>(newSourceOp2.getLoc(), cond2.getType(), cond2, newSourceOp3);
+      auto newCbranch2 = builder.create<ConditionalBranchOp>(newSourceOp2.getLoc(), newSourceOp2, newConstOp4);
+      for(int i = 0; i < 2; i++) {
+        auto newSinkOp = builder.create<SinkOp>(newCbranch2->getResult(i).getLoc(), newCbranch2->getResult(i));
+      }
+      newSourceOp2->getResult(0).replaceAllUsesWith(newMergeOp.getResult());
+      //newConstOp3->getResult(0).replaceUsesOfWith(newMergeOp.getResult());
+
+      
+      //newSinkOp->getOperand(0).replaceAllUsesWith(newForkOp->getResult(forkSize));
+      forkToReplace.erase();
+      //newSourceOp2->getResult(0);
+      newSourceOp2.erase();
+      //newConstOp3.erase();
+      break;
+  }
+  */
+  
+  
+  OpBuilder builder(&getContext());
+  mlir::OpResult connectionPoint;
+  for (auto forkToReplace : llvm::make_early_inc_range(info.funcOp.getOps<ForkOp>())) {
+    connectionPoint = extend_fork(&builder, forkToReplace);
+    break;
+  }
+  connectionPoint = addConst(&builder, &connectionPoint, 0);
+  connectionPoint = addBranch(&builder, &connectionPoint);
+  addSink(&builder, &connectionPoint);
+  
+  /*
+  for(auto block : logicBBconversion) {
+    llvm::errs() << "Current block: " << *block << "*****************************************************************\n";
+    
+    for (mlir::Operation &op : block->getOperations()) {
+        llvm::errs() << "Traversing operation " << op << "\n";
+    }
+    
+  }
+  */
+
+  llvm::errs() << "CHECK POINT: This should be visible!\n";
+  data.someCountOfSomething += 20;
   delete milp;
   return res;
 }
@@ -440,6 +728,7 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
     if (failed(pm.run(modOp))) {
       return signalPassFailure();
     }
+    /*
 
     llvm::errs() << "\nInitally:\n";
     
@@ -457,7 +746,7 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
         data_mod[item.op] = item.occupancy;
       }
     }
-
+    
     for(auto item : data_mod) {
       llvm::errs() << "Operation " << item.first 
                    << ", occupancy: " << item.second 
@@ -483,6 +772,17 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
     sharing.place_data(data.sharing_feedback, SCC, number_of_SCC, timingDB);
     sharing.print();
     
+    //get the Operation we want to add a fork and sink
+    mlir::Operation* OUT;
+    for(auto item : data_mod) {
+      OUT = item.first;
+      if(item.first->getName().getStringRef() == "arith.muli") {
+        break;
+      }
+    }
+    llvm::errs() << "\nchosen operation: " << OUT << "\n";
+    */
+    break;
     if (data.someCountOfSomething >= 20) {
       llvm::errs() << "\nBreaking out of the loop!\n";
       break;

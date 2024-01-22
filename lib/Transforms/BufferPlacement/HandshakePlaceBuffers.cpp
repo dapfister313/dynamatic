@@ -344,6 +344,7 @@ LogicalResult HandshakePlaceBuffersPass::getBufferPlacement(
     res = info.funcOp->emitError()
           << "Failed to extract placement decisions from MILP's solution.";
   }
+
   delete milp;
   return res;
 }
