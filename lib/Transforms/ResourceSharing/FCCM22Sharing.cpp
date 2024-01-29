@@ -1,8 +1,18 @@
 //===- FCCM22Sharing.h - resource-sharing -----*- C++ -*-===//
 //
 // Implements the --resource-sharing pass, which checks for sharable
-// Operations (little to none performance overhead).
+// Operations (sharable means little to no performance overhead).
 //===----------------------------------------------------------------------===//
+
+/*
+ ****************** What still needs to be implemented ******************
+ *
+ *  potentially hard:
+ *  -
+ *
+ *  easy:
+ *  -
+ */
 
 #include "dynamatic/Transforms/ResourceSharing/FCCM22Sharing.h"
 #include "dynamatic/Transforms/ResourceSharing/SCC.h"
@@ -16,7 +26,7 @@
 using namespace mlir;
 using namespace circt;
 
-//additional files
+//additional files, remove at the end what not needed
 #include "dynamatic/Transforms/BufferPlacement/HandshakePlaceBuffers.h"
 #include "circt/Dialect/Handshake/HandshakeDialect.h"
 #include "circt/Dialect/Handshake/HandshakeOps.h"
@@ -85,15 +95,6 @@ std::optional<unsigned> getLogicBB(Operation *op) {
   return {};
 }
 
-static void replaceFirstUse(Operation *op, Value oldVal, Value newVal) {
-  for (int i = 0, e = op->getNumOperands(); i < e; ++i)
-    if (op->getOperand(i) == oldVal) {
-      op->setOperand(i, newVal);
-      break;
-    }
-  return;
-}
-
 /// Recovered data needed for performing resource sharing
 struct ResourceSharing_Data {
   //extracts needed resource sharing data from FuncInfo struct
@@ -103,6 +104,7 @@ struct ResourceSharing_Data {
 
   unsigned someCountOfSomething = 0;
   unsigned totalNumberOfOpaqueBuffers = 0;
+  Operation *startingOp;
 };
 
 struct ResourceSharingFCCM22PerformancePass : public HandshakePlaceBuffersPass {
@@ -133,36 +135,79 @@ protected:
 struct Group {
   std::vector<mlir::Operation*> items;
   double shared_occupancy;
+  bool hasCycle;
+  
+  bool recursivelyDetermineIfCyclic(mlir::Operation* op, std::set<mlir::Operation*>& node_visited, mlir::Operation* ouc) {
+    node_visited.insert(op);
+    for (auto &u : op->getResults().getUses()) {
+      Operation *child_op = u.getOwner();
+      if(child_op == ouc) {
+        return true;
+      }
+      auto it = node_visited.find(child_op);
+      if(it == node_visited.end()) {
+        //not visited yet
+        if(recursivelyDetermineIfCyclic(child_op, node_visited, ouc)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  void addOperation(mlir::Operation* op) {
+    items.push_back(op);
+  }
+
+  bool determineIfCyclic(mlir::Operation* op) {
+    std::set<mlir::Operation*> node_visited;
+    return recursivelyDetermineIfCyclic(op, node_visited, op);
+  }
 
   //Constructors
+  Group(std::vector<mlir::Operation*> ops, double occupancy, bool cyclic)
+        : shared_occupancy(occupancy) {
+          items = ops;
+          hasCycle = cyclic;
+        }
+
   Group(mlir::Operation* op, double occupancy)
         : shared_occupancy(occupancy) {
           items.push_back(op);
+          hasCycle = determineIfCyclic(op);
         }
   Group(mlir::Operation* op)
         : shared_occupancy(-1) {
           items.push_back(op);
-        }
-
+          hasCycle = determineIfCyclic(op);
+        }     
 
   //Destructor
   ~Group() {};
 };
 
+//abbreviation to iterate through list of groups
+typedef std::list<Group>::iterator GroupIt;
+
 /*
-       Each building block resides in a set
+       Each basic block resides in a set
        of strongly connected components
+       For Example: A set could be {1,2,3}
 */
 struct Set {
   std::list<Group> groups{};
   int SCC_id;
   double op_latency;
-
+ 
   void addGroup(Group group) {
     groups.push_back(group);
   }
 
-  //Constructor
+  //Constructors
+  Set(double latency) {
+    op_latency = latency;
+  }
+
   Set(Group group) {
     groups.push_back(group);
   }
@@ -171,33 +216,50 @@ struct Set {
     SCC_id = SCC_idx;
     op_latency = latency;
   }
-  
-  /*
-  bool groups_mergeable(int i, int j) {
-    if(i == j) {
-      return false;
-    }
 
-    if(groups[i].occupancy + groups[j].occupancy > op_latency) {
-      return false;
-    }
-    
-    //make performance analysis here
-
-    return true;
+  void joinGroups(GroupIt group1, GroupIt group2, std::vector<mlir::Operation*>& finalOrd) {
+    Group newly_created = Group(finalOrd, group1->shared_occupancy + group1->shared_occupancy, group1->hasCycle | group2->hasCycle);
+    groups.erase(group1);
+    groups.erase(group2);
+    groups.push_back(newly_created);
   }
 
-  bool merge_groups(int i, int j) {
-    if(!groups_mergeable(i, j)) {
-      return false;
+  void joinSet(Set *joined_element) {
+    GroupIt pelem = groups.begin();
+    for(GroupIt jelem = joined_element->groups.begin(); 
+        jelem != joined_element->groups.end(); pelem++, jelem++) {
+      pelem->items.insert(pelem->items.end(), 
+                          jelem->items.begin(), 
+                          jelem->items.end()
+                          );
     }
-
-    //merge groups here
-
-    return true;
   }
-  */
 };
+
+
+/*
+ *  Find all combinations of 2 items in a list
+ *  Permutations are treated as not unique
+ *  Example: group1, group2 is the same as group2, group1
+ */
+ std::vector<std::pair<GroupIt, GroupIt>> combinations(Set *set) {
+   std::vector<std::pair<GroupIt, GroupIt>> result;
+   for(GroupIt g1 = set->groups.begin(); g1 != set->groups.end(); g1++) {
+      GroupIt g2 = g1;
+      g2++;
+      for( ; g2 != set->groups.end(); g2++) {
+        result.push_back(std::make_pair(g1, g2));
+      }
+   }
+   return result;
+ }
+
+/*
+ * check if occupancy sum is at most equal to the unit latency
+ */
+bool checkOccupancySum(GroupIt group1, GroupIt group2, double unit_latency) {
+  return group1->shared_occupancy + group2->shared_occupancy <= unit_latency;
+}
 
 /*
        Each operation type (e.g. mul, add, load) 
@@ -208,6 +270,8 @@ struct OpSelector {
   llvm::StringRef identifier;
   std::vector<Set> sets{};
   std::map<int, int> SetSelect;
+  Set final_grouping;
+  std::list<mlir::Operation*> Ops_not_on_CFG;
   
   void addSet(Group group) {
     sets.push_back(Set(group));
@@ -215,8 +279,72 @@ struct OpSelector {
 
   //Constructor
   OpSelector(double latency, llvm::StringRef identifier)
-        : op_latency(latency), identifier(identifier) {}
+        : op_latency(latency), identifier(identifier), final_grouping(Set(latency)) {
+        }
+  
+  void print() {
+    llvm::errs() << identifier << "\n";
+    for(auto set : sets) {
+      llvm::errs() << "SCC"  << set.SCC_id << ":\n";
+      int group_count = 0;
+      for(auto group : set.groups) {
+        llvm::errs() << "Group " << group_count++ << ": ";
+        for(auto item : group.items) {
+          llvm::errs() << item << ", ";
+        }
+      }
+      llvm::errs() << "\n";
+    }
+  }
 
+  void printFinalGroup() {
+    llvm::errs() << "Final grouping for " <<identifier << ":\n";
+    int group_count = 0;
+      for(auto group : final_grouping.groups) {
+        llvm::errs() << "Group " << group_count++ << ": ";
+        for(auto item : group.items) {
+          llvm::errs() << item << ", ";
+        }
+      }
+      llvm::errs() << "\n";
+  }
+
+  void sharingAcrossLoopNests() {
+    int number_of_sets = sets.size();
+    if(!number_of_sets) {
+      return;
+    }
+    
+    int max_set_size = -1;
+    int max_idx = -1;
+    for(int i = 0; i < number_of_sets; i++) {
+      if((int)sets[i].groups.size() > max_set_size) {
+        max_set_size = sets[i].groups.size();
+        max_idx = i;
+      }
+    }
+    //choose initial set 
+    final_grouping = sets[max_idx];
+
+    for(int i = 0; i < number_of_sets; i++) {
+      if(i == max_idx) {
+        continue;
+      }
+      final_grouping.joinSet(&sets[i]);
+    }
+  
+  }
+
+  void sharingOtherUnits() {
+    auto it = final_grouping.groups.begin();
+    for(auto unit : Ops_not_on_CFG) {
+      it->addOperation(unit);
+      it++;
+      if(it == final_grouping.groups.end()) {
+        it = final_grouping.groups.begin();
+      }
+    }
+  }
 };
 
 /*
@@ -224,19 +352,85 @@ struct OpSelector {
        operation types
 */
 class ResourceSharing {
-  std::vector<OpSelector> operation_type; //{};
   std::map<int, double> throughput;
   SmallVector<experimental::ArchBB> archs;
   std::map<llvm::StringRef, int> OpNames;
   int number_of_operation_types;
+  //operation directly after start
+  Operation *firstOp = nullptr;
+  //Operations in topological order
+  std::map<Operation *, unsigned int> OpTopologicalOrder;
   
   double runPerformanceAnalysis() {
     return 0;
   }
 
+  void recursiveDFStravel(Operation *op, unsigned int *position) {
+    //add operation
+    OpTopologicalOrder[op] = *position;
+    //update count value
+    *position += 1;
+    //DFS over all child ops
+    for (auto &u : op->getResults().getUses()) {
+      Operation *child_op = u.getOwner();
+      auto it = OpTopologicalOrder.find(child_op);
+      if(it == OpTopologicalOrder.end()) {
+        //not visited yet
+        recursiveDFStravel(child_op, position);
+      }
+    }
+  }
+
 public:
+  std::vector<OpSelector> operation_types;
+  
+  void setFirstOp(Operation *op) {
+    firstOp = op;
+  }
+
+  Operation *getFirstOp() {
+    return firstOp;
+  }
+
+  void initializeTopolocialOpSort() {
+    if(firstOp == nullptr) {
+      llvm::errs() << "[Error] Operation directly after start not yet present\n";
+    }
+    unsigned int position = 0;
+    recursiveDFStravel(firstOp, &position);
+    return;
+  }
+
+  void printTopologicalOrder() {
+    llvm::errs() << "Topological Order: \n";
+    for(auto [op, id] : OpTopologicalOrder) {
+      llvm::errs() << id << " : " << op << "\n";
+    }
+  }
+  
+  /*
+   * if neighter group 1 nor group 2 are cyclic, we can find a 
+   * (not neccesarily unique) topolocical ordering
+   */
+   std::vector<Operation*> sortTopologically(GroupIt group1, GroupIt group2) {
+    std::vector<Operation*> result(group1->items.size() + group2->items.size());
+    //add all operations in sorted order
+    merge(group1->items.begin(), group1->items.end(), group2->items.begin(), group2->items.end(), result.begin(), [this](Operation *a, Operation *b) {return OpTopologicalOrder[a] < OpTopologicalOrder[b];});
+    return result;
+   }
+
+   bool isTopologicallySorted(std::vector<Operation*> Ops) {
+    for(unsigned long i = 0; i < Ops.size() - 1; i++) {
+      if(OpTopologicalOrder[Ops[i]] > OpTopologicalOrder[Ops[i+1]]) {
+        return false;
+      }
+    }
+    return true;
+   }
+
+
   //place resource sharing data retrieved from buffer placement
-  void place_data(ResourceSharingInfo sharing_feedback, std::vector<int>& SCC, int number_of_SCC, TimingDatabase timingDB) {
+  void retrieveDataFromPerformanceAnalysis(ResourceSharingInfo sharing_feedback, std::vector<int>& SCC, int number_of_SCC, TimingDatabase timingDB) {
     //Take biggest occupancy per operation
     std::unordered_map<mlir::Operation*, std::pair<double,double>> data_mod;
     for(auto item : sharing_feedback.sharing_init) {
@@ -253,10 +447,11 @@ public:
     //iterate through all retrieved operations
     for(auto sharing_item : data_mod) {
       //choose the right operation type
+      
       double latency;
       if (failed(timingDB.getLatency(sharing_item.first, latency)))
         latency = 0.0;
-      llvm::errs() << "Latency of unit " << sharing_item.first << ": " << latency << "\n";
+      
       llvm::StringRef OpName = sharing_item.first->getName().getStringRef();
       Group group_item = Group(sharing_item.first, sharing_item.second.first);
       int OpIdx = -1;
@@ -267,14 +462,19 @@ public:
         OpNames[OpName] = number_of_operation_types;
         OpIdx = number_of_operation_types;
         ++number_of_operation_types;
-        operation_type.push_back(OpSelector(sharing_item.second.second, OpName));
+        operation_types.push_back(OpSelector(sharing_item.second.second, OpName));
       }
-      OpSelector& OpT = operation_type[OpIdx];
+      OpSelector& OpT = operation_types[OpIdx];
       
       //choose the right set
       int SetIdx = -1;
       unsigned int BB = getLogicBB(sharing_item.first).value();
       int SCC_idx = SCC[BB];
+      if(SCC_idx == -1) {
+        //Operation not part of a set
+        OpT.Ops_not_on_CFG.push_back(sharing_item.first);
+        continue;
+      }
       auto set_select = OpT.SetSelect.find(SCC_idx);
       if(set_select != OpT.SetSelect.end()) {
         SetIdx = set_select->second;
@@ -290,83 +490,21 @@ public:
     }
     throughput = sharing_feedback.sharing_check;
   }
-
-  int place_BB(SmallVector<experimental::ArchBB> archs_ext) {
-    archs = archs_ext;
+  
+  //return number of Basic Blocks
+  int getNumberOfBasicBlocks() {
     unsigned int maximum = 0;
     for(auto arch_item : archs) {
       maximum = std::max(maximum, std::max(arch_item.srcBB, arch_item.dstBB));
     }
     return maximum + 1; //as we have BB0, we need to add one at the end
   }
-  /*
-  void recursiveDFS(unsigned int starting_node, std::vector<bool> &visited) {
-    visited[starting_node] = true;
-    for(auto arch_item : archs) {
-      if(arch_item.srcBB == starting_node && !visited[arch_item.dstBB]) {
-        recursiveDFS(arch_item.dstBB, visited);
-      }
-    }
+
+  //place retrieved Basic block connections
+  void getListOfControlFlowEdges(SmallVector<experimental::ArchBB> archs_ext) {
+    archs = archs_ext;
   }
-
-  int max(int a, int b) {
-    if(a > b) {
-      return a;
-    }
-    return b;
-  }
-  
-  int find_strongly_connected_components(std::vector<int>& SCC) {
-    int BBs = 0;
-    for(auto arch_item : archs) {
-      BBs = max(BBs, arch_item.srcBB);
-      BBs = max(BBs, arch_item.dstBB);
-    }
-    BBs += 1;
-    llvm::errs() << "Number of BBs: " << BBs << "\n\n";
-
-    std::vector<std::vector<bool>> visited(BBs, std::vector<bool>(BBs, false));
-    
-    for(int i = 0; i < BBs; i++) {
-      recursiveDFS(i, visited[i]);
-    }
-
-    std::vector<int> Sets(BBs);
-    int position = 1;
-    bool taken = false;
-    std::vector<int> num_of_items(BBs);
-
-    for(int i = 0; i < BBs; i++) {
-      for(int j = 0; j < BBs; j++) {
-        num_of_items[i] += visited[i][j];
-      }
-    }
-    
-    for(int i = 0; i <= BBs; i++) {
-      for(int j = 0; j < BBs; j++) {
-        if(num_of_items[j] != i) {
-          continue;
-        }
-        for(int k = 0; k < BBs; k++) {
-          if(visited[j][k] && !Sets[k]) {
-            Sets[k] = position;
-            taken = true;
-          }
-        }
-      }
-      if(taken) {
-        position += 1;
-        taken = false;
-      }
-    }
-    for(int i = 0; i < BBs; i++) {
-      SCC[i] = Sets[i] - 1;
-    }
-    llvm::errs() << "\n\n";
-    return position - 1;
-  }
-  */
-
+ 
   std::vector<int> performSCC_bbl() {
     return Kosarajus_algorithm_BBL(archs);
   }
@@ -381,7 +519,7 @@ public:
     for(; it != throughput.end(); it++) {
       llvm::errs() << "CFDFC #" << it->first << ": " << it->second << "\n";
     }
-    for(auto Op : operation_type) {
+    for(auto Op : operation_types) {
       llvm::errs() << "\n*** New Operation type: " << Op.identifier << " ***\n";
       for(auto set : Op.sets) {
         llvm::errs() << "** New set **\n";
@@ -428,263 +566,50 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
     res = info.funcOp->emitError()
           << "Failed to extract placement decisions from MILP's solution.";
   }
-  //std::vector<Op_stats> occupancy_info; //!!!!!
+  
   // Walkin' in the IR:
-  
-  //value after start is "info.funcOp->getArguments().back()"
-  /*
-  for(auto result : info.funcOp->getArguments().back()) {
-    llvm::errs() << "Argument: " << result << "\n";
-  }
-  */
-  // If we are in the entry block, we can use the start input of the
-  // function (last argument) as our control value
-  assert(info.funcOp.getArguments().back().getType().isa<NoneType>() &&
-          "expected last function argument to be a NoneType");
-  llvm::errs() << "Argument: " << info.funcOp.getArguments().back() << "\n";
-  
-  /*
-  unsigned int number_of_basic_blocks = 0;
-  for(auto arch_item : info.archs) {
-    number_of_basic_blocks = std::max(number_of_basic_blocks, std::max(arch_item.srcBB, arch_item.dstBB));
-  }
-  ++number_of_basic_blocks;
-
-  llvm::errs() << "Number of basic blocks: " << number_of_basic_blocks << "\n";
-  */
-
-  SmallVector<mlir::Block *> logicBBconversion;
-  int currentHighestBB = -1;
   llvm::errs() << "Walkin' inside the IR:\n";
   for (Operation &op : info.funcOp.getOps()) {
     llvm::errs() << "Operation" << op << "\n";
-    std::optional<unsigned> brBB = getLogicBB(&op);
-    if(brBB) {
-      if((unsigned)(currentHighestBB + 1) == brBB.value()) {
-        logicBBconversion.push_back(&op.getParentRegion()->getBlocks().front());
-        ++currentHighestBB;
-      }
-      //llvm::errs() << "Logic BB: " << brBB.value() << "\n";
+    std::vector<Operation *> opsToProcess;
+    for (auto &u : op.getResults().getUses())
+      opsToProcess.push_back(u.getOwner());
+    llvm::errs() << "Successors: ";
+    for(auto op1 : opsToProcess) {
+      llvm::errs() << op1 << ", ";
     }
+    llvm::errs() << "\n";
   }
 
   // Here, before destroying the MILP, extract whatever information you want
   // and store it into your MyData& reference. If you need to extract variable
   // values from the MILP you may need to make some of its fields public (to
   // be discussed in PRs).
+  
+  // If we are in the entry block, we can use the start input of the
+  // function (last argument) as our control value
+  assert(info.funcOp.getArguments().back().getType().isa<NoneType>() &&
+          "expected last function argument to be a NoneType");
+  llvm::errs() << "Argument: " << info.funcOp.getArguments().back() << "\n";
+  Value func = info.funcOp.getArguments().back();
+  std::vector<Operation *> startingOps;
+  for (auto &u : func.getUses())
+    startingOps.push_back(u.getOwner());
+  if(startingOps.size() != 1)
+    llvm::errs() << "[Critical Error] Expected 1 starting Operation, got " << startingOps.size() << "\n";
+  data.startingOp = startingOps[0];
+  
+  for(auto arch_item : info.archs) {
+    llvm::errs() << "Source: " << arch_item.srcBB << ", Destination: " << arch_item.dstBB << "\n";
+  }
+  
   llvm::errs() << "Setting some random count!\n";
   data.someCountOfSomething += 10;
   llvm::errs() << "Current count: " << data.someCountOfSomething << "\n";
 
   data.sharing_feedback = info.sharing_info;
   data.archs = info.archs;
-  
-  /*
-  for(auto arch_item : info.archs) {
-    llvm::errs() << "Source: " << arch_item.srcBB << ", Destination: " << arch_item.dstBB << "\n";
-  }
-  */
-  
-  /*
-  OpBuilder builder(&getContext());
-  llvm::errs() << "Test!" << "\n";
-  std::vector<circt::handshake::ForkOp *> delete_vector;
-  int break_point = 0;
 
-  for (auto forkToReplace :
-      llvm::make_early_inc_range(info.funcOp.getOps<ForkOp>())) {
-    if(break_point == 3) {
-      llvm::errs() << forkToReplace << "\n";
-      Operation *opSrc = forkToReplace.getOperand().getDefiningOp();
-      Value opSrcIn = forkToReplace.getOperand();
-      std::vector<Operation *> opsToProcess;
-      for (auto &u : forkToReplace.getResults().getUses())
-        opsToProcess.push_back(u.getOwner());
-    
-      // Insert fork after op
-      builder.setInsertionPointAfter(opSrc);
-      auto forkSize = opsToProcess.size();
-      llvm::errs() << "Fork Size: " << forkSize << "************************************\n";
-      
-      auto newForkOp = builder.create<ForkOp>(opSrcIn.getLoc(), opSrcIn, forkSize + 1);
-      inheritBB(opSrc, newForkOp);
-      for (int i = 0, e = forkSize; i < e; ++i)
-        opsToProcess[i]->replaceUsesOfWith(forkToReplace->getResult(i), newForkOp->getResult(i));
-      auto newSinkOp = builder.create<SinkOp>(newForkOp->getResult(forkSize).getLoc(), newForkOp->getResult(forkSize));
-      forkToReplace.erase();
-      
-      break;
-    }
-    ++break_point;
-  }
-  */
-  /*
-  OpBuilder builder(&getContext());
-  llvm::errs() << "Test!" << "\n";
-  int break_point = 0;
-  for (auto forkToReplace :
-      llvm::make_early_inc_range(info.funcOp.getOps<ForkOp>())) {
-        if(break_point) {
-          llvm::errs() << "Fork: " << forkToReplace << "\n";
-          Operation *opSrc = forkToReplace.getOperand().getDefiningOp();
-          Value opSrcIn = forkToReplace.getOperand();
-          std::vector<Operation *> opsToProcess;
-          for (auto &u : forkToReplace.getResults().getUses())
-            opsToProcess.push_back(u.getOwner());
-        
-          // Insert fork after op
-          builder.setInsertionPointAfter(opSrc);
-          auto forkSize = opsToProcess.size();
-          llvm::errs() << "Fork Size: " << forkSize << "************************************\n";
-          
-          auto newForkOp = builder.create<ForkOp>(opSrcIn.getLoc(), opSrcIn, forkSize + 2);
-          inheritBB(opSrc, newForkOp);
-          for (int i = 0, e = forkSize; i < e; ++i)
-            opsToProcess[i]->replaceUsesOfWith(forkToReplace->getResult(i), newForkOp->getResult(i));
-          Value condValue = newForkOp->getResult(forkSize); //newForkOp.getOperand(); //dyn_cast<mlir::cf::CondBranchOp>(newForkOp).getCondition();
-          llvm::errs() << "Resulted value: " << condValue << "\n";
-          llvm::errs() << "Previous value: " << forkToReplace->getResult(forkSize-1) << "\n";
-          auto newCbranch = builder.create<ConditionalBranchOp>(newForkOp->getResult(forkSize).getLoc(), newForkOp->getResult(forkSize), newForkOp->getResult(forkSize + 1));
-          //auto newSinkOp = builder.create<SinkOp>(newForkOp_red->getResult(0).getLoc(), newForkOp_red->getResult(0));
-          for(int i = 0; i < 2; i++) {
-            auto newSinkOp = builder.create<SinkOp>(newCbranch->getResult(i).getLoc(), newCbranch->getResult(i));
-          }
-          forkToReplace.erase();
-          break;
-        }
-        break_point++;
-  }
-  */
-  /*
-  OpBuilder builder(&getContext());
-  for (auto cmpi_to_add : llvm::make_early_inc_range(info.funcOp.getOps<arith::CmpIOp>())) {
-    Operation *opSrc = cmpi_to_add;
-    Operation *opDst = cmpi_to_add->getNextNode();
-    builder.setInsertionPointAfter(opSrc);
-
-    Value bufferIn = opDst->getOperand(0);
-    auto placeBuffer = [&](BufferTypeEnum bufType, unsigned numSlots) {
-      if (numSlots == 0)
-        return;
-
-      // Insert an opaque buffer
-      auto bufOp = builder.create<handshake::BufferOp>(
-          bufferIn.getLoc(), bufferIn, numSlots, bufType);
-      inheritBB(opSrc, bufOp);
-      Value bufferRes = bufOp.getResult();
-
-      opDst->replaceUsesOfWith(bufferIn, bufferRes);
-      bufferIn = bufferRes;
-    };
-    break;
-  };
-  */
-  
-  /*
-  OpBuilder builder(&getContext());
-  llvm::errs() << "Test!" << "\n";
-  int break_point = 0;
-  for (auto cmpi_to_add : llvm::make_early_inc_range(info.funcOp.getOps<arith::CmpIOp>())) {
-    Operation *opSrc = cmpi_to_add;
-    builder.setInsertionPointAfter(opSrc);
-    llvm::errs() << "Operation source: " << opSrc->getName().getStringRef() << "\n";
-    Operation *opDst = cmpi_to_add->getNextNode();
-    llvm::errs() << "Operation destination: " << opDst->getName().getStringRef() << "\n";
-    Value opDstOut = opDst->getOperand(0);
-    Value opSrcIn = opSrc->getResult(0);
-    auto newForkOp = builder.create<ForkOp>(opSrcIn.getLoc(), opSrcIn, 3);
-    inheritBB(cmpi_to_add, newForkOp);
-    Value OpRes = newForkOp->getResult(0);
-    opDst->replaceUsesOfWith(opDstOut, OpRes);
-    //auto newSrc = builder.create<SourceOp>(...);
-    auto newCbranch = builder.create<ConditionalBranchOp>(newForkOp->getResult(1).getLoc(), newForkOp->getResult(1), newForkOp->getResult(2));
-    for(int i = 0; i < 2; i++) {
-      auto newSinkOp = builder.create<SinkOp>(newCbranch->getResult(i).getLoc(), newCbranch->getResult(i));
-    }
-    break;
-  }
-  */
-  /*
-  //perform merge
-  OpBuilder builder(&getContext());
-  for (auto forkToReplace :
-      llvm::make_early_inc_range(info.funcOp.getOps<ForkOp>())) {
-
-      llvm::errs() << forkToReplace << "\n";
-      Operation *opSrc = forkToReplace.getOperand().getDefiningOp();
-      Value opSrcIn = forkToReplace.getOperand();
-      std::vector<Operation *> opsToProcess;
-      for (auto &u : forkToReplace.getResults().getUses())
-        opsToProcess.push_back(u.getOwner());
-    
-      // Insert fork after op
-      builder.setInsertionPointAfter(opSrc);
-      auto forkSize = opsToProcess.size();
-      
-      auto newForkOp = builder.create<ForkOp>(opSrcIn.getLoc(), opSrcIn, forkSize + 1);
-      inheritBB(opSrc, newForkOp);
-      for (int i = 0, e = forkSize; i < e; ++i)
-        opsToProcess[i]->replaceUsesOfWith(forkToReplace->getResult(i), newForkOp->getResult(i));
-      
-      auto newSourceOp = builder.create<handshake::SourceOp>(newForkOp.getLoc(), builder.getNoneType());
-      IntegerAttr cond = builder.getBoolAttr(true);
-      auto newConstOp = builder.create<handshake::ConstantOp>(newSourceOp.getLoc(), cond.getType(), cond, newSourceOp);
-      auto newConstOp_2 = builder.create<handshake::ConstantOp>(newForkOp->getResult(forkSize).getLoc(), cond.getType(), cond, newForkOp->getResult(forkSize));
-      auto newCbranch = builder.create<ConditionalBranchOp>(newConstOp_2.getLoc(), newConstOp_2, newConstOp);
-      inheritBB(opSrc, newCbranch);
-      SmallVector<Value> ForkOpS;
-      for(int i = 0; i < 2; i++) {
-        auto newForkOp2 = builder.create<ForkOp>(newCbranch->getResult(i).getLoc(), newCbranch->getResult(i), 1);
-        ForkOpS.push_back(newForkOp2->getResult(0));
-      }
-      //MergeOp: create merge here! 
-      auto newMergeOp = builder.create<handshake::MergeOp>(ForkOpS[0].getLoc(), ForkOpS);
-
-      auto newSourceOp2 = builder.create<handshake::SourceOp>(newForkOp.getLoc(), builder.getNoneType());
-      //auto newConstOp3 = builder.create<handshake::ConstantOp>(newSourceOp2.getLoc(), cond.getType(), cond, newSourceOp2);
-      auto newSourceOp3 = builder.create<handshake::SourceOp>(newForkOp.getLoc(), builder.getNoneType());
-      IntegerAttr cond2 = builder.getBoolAttr(false);
-      auto newConstOp4 = builder.create<handshake::ConstantOp>(newSourceOp2.getLoc(), cond2.getType(), cond2, newSourceOp3);
-      auto newCbranch2 = builder.create<ConditionalBranchOp>(newSourceOp2.getLoc(), newSourceOp2, newConstOp4);
-      for(int i = 0; i < 2; i++) {
-        auto newSinkOp = builder.create<SinkOp>(newCbranch2->getResult(i).getLoc(), newCbranch2->getResult(i));
-      }
-      newSourceOp2->getResult(0).replaceAllUsesWith(newMergeOp.getResult());
-      //newConstOp3->getResult(0).replaceUsesOfWith(newMergeOp.getResult());
-
-      
-      //newSinkOp->getOperand(0).replaceAllUsesWith(newForkOp->getResult(forkSize));
-      forkToReplace.erase();
-      //newSourceOp2->getResult(0);
-      newSourceOp2.erase();
-      //newConstOp3.erase();
-      break;
-  }
-  */
-  
-  
-  OpBuilder builder(&getContext());
-  mlir::OpResult connectionPoint;
-  for (auto forkToReplace : llvm::make_early_inc_range(info.funcOp.getOps<ForkOp>())) {
-    connectionPoint = extend_fork(&builder, forkToReplace);
-    break;
-  }
-  connectionPoint = addConst(&builder, &connectionPoint, 0);
-  connectionPoint = addBranch(&builder, &connectionPoint);
-  addSink(&builder, &connectionPoint);
-  
-  /*
-  for(auto block : logicBBconversion) {
-    llvm::errs() << "Current block: " << *block << "*****************************************************************\n";
-    
-    for (mlir::Operation &op : block->getOperations()) {
-        llvm::errs() << "Traversing operation " << op << "\n";
-    }
-    
-  }
-  */
-
-  llvm::errs() << "CHECK POINT: This should be visible!\n";
   data.someCountOfSomething += 20;
   delete milp;
   return res;
@@ -718,7 +643,12 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
   ModuleOp modOp = getOperation();
   ResourceSharing_Data data;
   
-  while (true) {
+
+  TimingDatabase timingDB(&getContext());
+  if (failed(TimingDatabase::readFromJSON(timingModels, timingDB)))
+    return signalPassFailure();
+
+  
     // Data object to extract information from buffer placement
     // Use a pass manager to run buffer placement on the current module
     PassManager pm(&getContext());
@@ -728,15 +658,6 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
     if (failed(pm.run(modOp))) {
       return signalPassFailure();
     }
-    /*
-
-    llvm::errs() << "\nInitally:\n";
-    
-    for(auto item : data.sharing_feedback.sharing_init) {
-      item.print();
-    }
-
-    llvm::errs() << "\nAfter modification:\n";
     
     std::unordered_map<mlir::Operation*, double> data_mod;
     for(auto item : data.sharing_feedback.sharing_init) {
@@ -747,47 +668,91 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
       }
     }
     
-    for(auto item : data_mod) {
-      llvm::errs() << "Operation " << item.first 
-                   << ", occupancy: " << item.second 
-                   << ", block number: " << getLogicBB(item.first)
-                   << "\n";
-    }
-    
     ResourceSharing sharing;
-    int number_of_basic_blocks = sharing.place_BB(data.archs);
-
-    //perform SCC computation
-    llvm::errs() << "\nSCC distribution: ";
-    std::vector<int> SCC = sharing.performSCC_bbl();
-    int number_of_SCC = SCC.size();
-    for(int i = 0; i < number_of_basic_blocks; i++) {
-      llvm::errs() << SCC[i] << ", ";
-    }
-    llvm::errs() << "\n\n";
-
-    TimingDatabase timingDB(&getContext());
-    if (failed(TimingDatabase::readFromJSON(timingModels, timingDB)))
-      return signalPassFailure();
-    sharing.place_data(data.sharing_feedback, SCC, number_of_SCC, timingDB);
-    sharing.print();
+    sharing.setFirstOp(data.startingOp);
+    sharing.initializeTopolocialOpSort();
+    sharing.getListOfControlFlowEdges(data.archs);
+    int number_of_basic_blocks = sharing.getNumberOfBasicBlocks();
+    llvm::errs() << "Number of BBs: " << number_of_basic_blocks << "\n";
     
-    //get the Operation we want to add a fork and sink
-    mlir::Operation* OUT;
-    for(auto item : data_mod) {
-      OUT = item.first;
-      if(item.first->getName().getStringRef() == "arith.muli") {
-        break;
+    //perform SCC computation
+    std::vector<int> SCC = sharing.performSCC_bbl();
+
+    llvm::errs() << "SCC: ";
+    for(auto item : SCC) {
+      llvm::errs() << item << ", ";
+    }
+    llvm::errs() << "\n";
+    //get number of strongly connected components
+    int number_of_SCC = SCC.size();
+    
+    sharing.retrieveDataFromPerformanceAnalysis(data.sharing_feedback, SCC, number_of_SCC, timingDB);
+   
+   // iterating over different operation types
+   for(auto& op_type : sharing.operation_types) {
+    // Sharing within a loop nest
+    for(auto& set : op_type.sets) {
+      bool groups_modified = true;
+      while(groups_modified) {
+        groups_modified = false;
+
+        //iterate over combinations of groups
+        for(auto pair : combinations(&set)) {
+          //check if sharing is potentially possible
+          if(checkOccupancySum(pair.first, pair.second, op_type.op_latency)) {
+            std::vector<Operation*> finalOrd;
+            //check if operations on loop
+            if(!pair.first->hasCycle && !pair.second->hasCycle) {
+              llvm::errs() << "[comp] Non-cyclic\n";
+              finalOrd = sharing.sortTopologically(pair.first, pair.second);
+              if(!sharing.isTopologicallySorted(finalOrd)) {
+                llvm::errs() << "[info] Failed topological sorting\n";
+              }
+              groups_modified = true;
+              //run_performance analysis here !!!!!!!!!!!!!!!!!!!! -> buffer placement
+            } else {
+              llvm::errs() << "[comp] Cyclic\n";
+              // Search for best group ordering
+              std::vector<Operation*> current_permutation;
+              current_permutation.insert(current_permutation.end(), pair.first->items.begin(), pair.first->items.end());
+              current_permutation.insert(current_permutation.end(), pair.second->items.begin(), pair.second->items.end());
+              std::sort(current_permutation.begin(), current_permutation.end());
+              do { 
+                //Print out current permutation
+                llvm::errs() << "[Permutation] Start\n";
+                for(auto op : current_permutation) {
+                  llvm::errs() << op << ", ";
+                }
+                llvm::errs() << *"\n";
+
+                //run_performance analysis here !!!!!!!!!!!!!!!!!!!
+                //check if no performance loss, if yes, break
+                if(true) {
+                  finalOrd = current_permutation;
+                  break;
+                }
+              } while (next_permutation (current_permutation.begin(), current_permutation.end()));
+            }
+            if(finalOrd.size() != 0) {
+                //Merge groups, update ordering and update shared occupancy
+                set.joinGroups(pair.first, pair.second, finalOrd);   
+                break;          
+            }
+          }
+        }
       }
     }
-    llvm::errs() << "\nchosen operation: " << OUT << "\n";
-    */
-    break;
-    if (data.someCountOfSomething >= 20) {
-      llvm::errs() << "\nBreaking out of the loop!\n";
-      break;
-    }
-  }
+    op_type.print();
+    // Sharing across loop nests
+    op_type.sharingAcrossLoopNests();
+
+    op_type.printFinalGroup();
+    
+    // Sharing other units
+    op_type.sharingOtherUnits();
+
+    op_type.printFinalGroup();
+   }
 }
 
 namespace dynamatic {
