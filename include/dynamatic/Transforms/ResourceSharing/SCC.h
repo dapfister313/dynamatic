@@ -27,5 +27,6 @@
 std::vector<int> Kosarajus_algorithm_BBL(SmallVector<experimental::ArchBB> archs);
 
 //different implementation: performed on operation level
+void Kosarajus_algorithm_OPL(mlir::Operation* startOp, std::set<mlir::Operation*>& result, std::map<Operation *, unsigned int>& topological_sort);
 
 #endif // INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_SCC_H

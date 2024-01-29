@@ -365,20 +365,23 @@ class ResourceSharing {
     return 0;
   }
 
-  void recursiveDFStravel(Operation *op, unsigned int *position) {
+  void recursiveDFStravel(Operation *op, unsigned int *position, std::set<mlir::Operation*>& node_visited) {
     //add operation
-    OpTopologicalOrder[op] = *position;
-    //update count value
-    *position += 1;
+    node_visited.insert(op);
+    
     //DFS over all child ops
     for (auto &u : op->getResults().getUses()) {
       Operation *child_op = u.getOwner();
-      auto it = OpTopologicalOrder.find(child_op);
-      if(it == OpTopologicalOrder.end()) {
+      auto it = node_visited.find(child_op);
+      if(it == node_visited.end()) {
         //not visited yet
-        recursiveDFStravel(child_op, position);
+        recursiveDFStravel(child_op, position, node_visited);
       }
     }
+    //update container
+    OpTopologicalOrder[op] = *position;
+    *position++;
+    return;
   }
 
 public:
@@ -397,7 +400,8 @@ public:
       llvm::errs() << "[Error] Operation directly after start not yet present\n";
     }
     unsigned int position = 0;
-    recursiveDFStravel(firstOp, &position);
+    std::set<mlir::Operation*> node_visited;
+    recursiveDFStravel(firstOp, &position, node_visited);
     return;
   }
 
@@ -415,7 +419,7 @@ public:
    std::vector<Operation*> sortTopologically(GroupIt group1, GroupIt group2) {
     std::vector<Operation*> result(group1->items.size() + group2->items.size());
     //add all operations in sorted order
-    merge(group1->items.begin(), group1->items.end(), group2->items.begin(), group2->items.end(), result.begin(), [this](Operation *a, Operation *b) {return OpTopologicalOrder[a] < OpTopologicalOrder[b];});
+    merge(group1->items.begin(), group1->items.end(), group2->items.begin(), group2->items.end(), result.begin(), [this](Operation *a, Operation *b) {return OpTopologicalOrder[a] > OpTopologicalOrder[b];});
     return result;
    }
 
@@ -507,6 +511,10 @@ public:
  
   std::vector<int> performSCC_bbl() {
     return Kosarajus_algorithm_BBL(archs);
+  }
+
+  void performSCC_opl(std::set<mlir::Operation*>& result) {
+    Kosarajus_algorithm_OPL(firstOp, result, OpTopologicalOrder);
   }
   
   void print() {
@@ -602,7 +610,7 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   for(auto arch_item : info.archs) {
     llvm::errs() << "Source: " << arch_item.srcBB << ", Destination: " << arch_item.dstBB << "\n";
   }
-  
+
   llvm::errs() << "Setting some random count!\n";
   data.someCountOfSomething += 10;
   llvm::errs() << "Current count: " << data.someCountOfSomething << "\n";
@@ -670,7 +678,13 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
     
     ResourceSharing sharing;
     sharing.setFirstOp(data.startingOp);
+
+    //eigther use this
     sharing.initializeTopolocialOpSort();
+    //or this
+    std::set<mlir::Operation*> ops_with_no_loops;
+    sharing.performSCC_opl(ops_with_no_loops);
+
     sharing.getListOfControlFlowEdges(data.archs);
     int number_of_basic_blocks = sharing.getNumberOfBasicBlocks();
     llvm::errs() << "Number of BBs: " << number_of_basic_blocks << "\n";
@@ -678,11 +692,6 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
     //perform SCC computation
     std::vector<int> SCC = sharing.performSCC_bbl();
 
-    llvm::errs() << "SCC: ";
-    for(auto item : SCC) {
-      llvm::errs() << item << ", ";
-    }
-    llvm::errs() << "\n";
     //get number of strongly connected components
     int number_of_SCC = SCC.size();
     
