@@ -38,7 +38,7 @@ using namespace circt::handshake;
 using namespace mlir;
 using namespace dynamatic;
 using namespace dynamatic::experimental;
-
+/*
 namespace dynamatic {
 namespace buffer {
 
@@ -88,5 +88,5 @@ protected:
 
 } // namespace buffer
 } // namespace dynamatic
-
+*/
 #endif // DYNAMATIC_TRANSFORMS_BUFFERPLACEMENT_ITERATIVEBUFFERS_H

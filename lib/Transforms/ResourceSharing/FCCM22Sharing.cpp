@@ -87,15 +87,66 @@ using namespace dynamatic::experimental;
 
 //std::max
 #include <algorithm>
+
 namespace dynamatic {
 namespace buffer {
+
+  //stores/transfers information needed for resource sharing
+  struct ResourceSharingInfo {
+    
+    // for each CFDFC, store the throughput in double format to 
+    // double format to compare 
+    std::map<int, double> sharing_check{};
+    
+    //store stats of each operation
+    struct OpSpecific {
+      mlir::Operation* op; 
+      double occupancy; 
+      double op_latency;
+      //double throughput;
+
+      void print() {
+        llvm::errs() << "Operation " << op 
+                    << ", occupancy: " << occupancy 
+                    << ", latency: " << op_latency 
+                    << ", block: " << getLogicBB(op)
+                    << "\n";
+      }
+    };
+    std::vector<OpSpecific> sharing_init;
+
+    //constructor
+    ResourceSharingInfo() = default;
+  };
+ /*
+  struct MyFuncInfo : public FuncInfo {
+    //vector used to transfer important resource sharing parameters
+    ResourceSharingInfo sharing_info;
+    std::vector<Value> opaqueChannel;
+    MyFuncInfo(): FuncInfo(){};
+  };
+  */
 namespace fpga20 {
   class MyFPGA20Buffers : public FPGA20Buffers {
-    using FPGA20Buffers::FPGA20Buffers;
-    //protected:
-    //void logResults(DenseMap<Value, PlacementResult> &placement) override;
+    //using FPGA20Buffers::FPGA20Buffers;
     public:
     std::vector<ResourceSharingInfo::OpSpecific> getData();
+    LogicalResult addSyncConstraints(std::vector<Value> opaqueChannel) {
+      for(auto channel : opaqueChannel) {
+        ChannelVars &chVars = vars.channels[channel];
+        GRBVar &opaque = chVars.bufIsOpaque;
+        model.addConstr(opaque == 1.0, "additional_opaque_channel");
+      }
+      return success();
+    }
+    //virtual LogicalResult addElasticityConstraints(ValueRange elasticChannels, ArrayRef<Operation *> elasticUnits);
+    MyFPGA20Buffers(FuncInfo &funcInfo, const TimingDatabase &timingDB,
+                                GRBEnv &env, Logger *logger, double targetPeriod,
+                                double maxPeriod, bool legacyPlacement)
+        : FPGA20Buffers(funcInfo, timingDB, env, logger, targetPeriod,
+                                maxPeriod, legacyPlacement), funcInfo(funcInfo){};
+    protected:
+    FuncInfo &funcInfo;
   };
   std::vector<ResourceSharingInfo::OpSpecific> MyFPGA20Buffers::getData() {
     std::vector<ResourceSharingInfo::OpSpecific> return_info;
@@ -105,7 +156,7 @@ namespace fpga20 {
       auto [cf, cfVars] = cfdfcWithVars;
       // for each CFDFC, extract the throughput in double format
       throughput = cfVars.throughput.get(GRB_DoubleAttr_X);
-      funcInfo.sharing_info.sharing_check[idx] = throughput;
+      //funcInfo.sharing_info.sharing_check[idx] = throughput;
       
       for (auto &[op, unitVars] : cfVars.units) {
         sharing_item.op = op;
@@ -119,6 +170,51 @@ namespace fpga20 {
     }
     return return_info;
   }
+  /*
+  LogicalResult MyFPGA20Buffers::addElasticityConstraints(ValueRange elasticChannels,
+                                                        ArrayRef<Operation *> elasticUnits) {
+    llvm::errs() << "Elasticity constraint overwritten!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n";
+    // Upper bound for the longest rigid path
+    unsigned cstCoef = std::distance(funcInfo.funcOp.getOps().begin(),
+                                    funcInfo.funcOp.getOps().end()) +
+                      2;
+
+    // Add elasticity constraints for channels
+    for (Value channel : elasticChannels) {
+      ChannelVars &chVars = vars.channels[channel];
+      GRBVar &tIn = chVars.tElasIn;
+      GRBVar &tOut = chVars.tElasOut;
+      GRBVar &present = chVars.bufPresent;
+      GRBVar &opaque = chVars.bufIsOpaque;
+      GRBVar &numSlots = chVars.bufNumSlots;
+      if(std::find(funcInfo.opaqueChannel.begin(), funcInfo.opaqueChannel.end(), channel) != funcInfo.opaqueChannel.end()) {
+        model.addConstr(opaque == 1.0, "additional_opaque_channel");
+      }
+      // If there is an opaque buffer on the channel, the channel elastic
+      // arrival time at the ouput must be greater than at the input (breaks
+      // cycles!)
+      model.addConstr(tOut >= tIn - cstCoef * opaque, "elastic_cycle");
+      // If there is an opaque buffer, there must be at least one slot
+      model.addConstr(numSlots >= opaque, "elastic_slots");
+      // If there is at least one slot, there must be a buffer
+      model.addConstr(present >= 0.01 * numSlots, "elastic_present");
+    }
+
+
+    // Add an elasticity constraint for every input/output port pair in the
+    // elastic units
+    for (Operation *op : elasticUnits) {
+      forEachIOPair(op, [&](Value in, Value out) {
+        GRBVar &tInPort = vars.channels[in].tElasOut;
+        GRBVar &tOutPort = vars.channels[out].tElasIn;
+        // The elastic arrival time at the output port must be at least one
+        // greater than at the input port
+        model.addConstr(tOutPort >= 1 + tInPort, "elastic_unitTime");
+      });
+    }
+    return success();
+  }
+  */
 }
 }
 }
@@ -288,13 +384,6 @@ struct Set {
  }
 
 /*
- * check if occupancy sum is at most equal to the unit latency
- */
-bool checkOccupancySum(GroupIt group1, GroupIt group2, double unit_latency) {
-  return group1->shared_occupancy + group2->shared_occupancy <= unit_latency;
-}
-
-/*
        Each operation type (e.g. mul, add, load) 
        can be treated separately
 */
@@ -385,9 +474,13 @@ struct OpSelector {
        operation types
 */
 class ResourceSharing {
+  //troughput per basic block
   std::map<int, double> throughput;
+  //connections between basic blocks
   SmallVector<experimental::ArchBB> archs;
+  //maps operation types to integers (SCC analysis)
   std::map<llvm::StringRef, int> OpNames;
+  //number of sharable operation types
   int number_of_operation_types;
   //operation directly after start
   Operation *firstOp = nullptr;
@@ -397,7 +490,8 @@ class ResourceSharing {
   double runPerformanceAnalysis() {
     return 0;
   }
-
+  
+  //used to run topological sorting
   void recursiveDFStravel(Operation *op, unsigned int *position, std::set<mlir::Operation*>& node_visited) {
     //add operation
     node_visited.insert(op);
@@ -578,9 +672,10 @@ public:
 LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
     FuncInfo &info, TimingDatabase &timingDB, Logger *logger,
     DenseMap<Value, PlacementResult> &placement) {
+      FuncInfo myInfo = info;
   /// This is exactly the same as the getBufferPlacement method in
   /// HandshakePlaceBuffersPass
-  info.opaqueChannel = data.opaqueChannel;
+  //myInfo.opaqueChannel = data.opaqueChannel;
   // Create Gurobi environment
   GRBEnv env = GRBEnv(true);
   env.set(GRB_IntParam_OutputFlag, 0);
@@ -591,30 +686,31 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   // Create and solve the MILP
   fpga20::MyFPGA20Buffers *milp = nullptr;
   if (algorithm == "fpga20")
-    milp = new fpga20::MyFPGA20Buffers(info, timingDB, env, logger, targetCP,
+    milp = new fpga20::MyFPGA20Buffers(myInfo, timingDB, env, logger, targetCP,
                                      targetCP * 2.0, false);
   else if (algorithm == "fpga20-legacy")
-    milp = new fpga20::MyFPGA20Buffers(info, timingDB, env, logger, targetCP,
+    milp = new fpga20::MyFPGA20Buffers(myInfo, timingDB, env, logger, targetCP,
                                      targetCP * 2.0, true);
+  milp->addSyncConstraints(data.opaqueChannel);
   assert(milp && "unknown placement algorithm");
   int milpStat;
   LogicalResult res = success();
   if (failed(milp->optimize(&milpStat))) {
-    res = info.funcOp->emitError()
+    res = myInfo.funcOp->emitError()
           << "Buffer placement MILP failed with status " << milpStat
           << ", reason:" << getGurobiOptStatusDesc(milpStat);
   } else if (failed(milp->getPlacement(placement))) {
-    res = info.funcOp->emitError()
+    res = myInfo.funcOp->emitError()
           << "Failed to extract placement decisions from MILP's solution.";
   }
   data.sharing_feedback.sharing_init = milp->getData();
   
-  NameUniquer names(info.funcOp);
+  NameUniquer names(myInfo.funcOp);
   dynamatic::sharing::controlStructure control_item;
   unsigned int BB_idx = 0;
   // Walkin' in the IR:
   llvm::errs() << "Walkin' inside the IR:\n";
-  for (Operation &op : info.funcOp.getOps()) {
+  for (Operation &op : myInfo.funcOp.getOps()) {
     if(op.getName().getStringRef() == "handshake.merge" || op.getName().getStringRef() == "handshake.control_merge") {
       for (const auto &u : op.getResults()) {
         if(u.getType().isa<NoneType>()) {
@@ -655,10 +751,10 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   
   // If we are in the entry block, we can use the start input of the
   // function (last argument) as our control value
-  assert(info.funcOp.getArguments().back().getType().isa<NoneType>() &&
+  assert(myInfo.funcOp.getArguments().back().getType().isa<NoneType>() &&
           "expected last function argument to be a NoneType");
-  llvm::errs() << "Argument: " << info.funcOp.getArguments().back() << "\n";
-  Value func = info.funcOp.getArguments().back();
+  llvm::errs() << "Argument: " << myInfo.funcOp.getArguments().back() << "\n";
+  Value func = myInfo.funcOp.getArguments().back();
   std::vector<Operation *> startingOps;
   for (auto &u : func.getUses())
     startingOps.push_back(u.getOwner());
@@ -666,7 +762,7 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
     llvm::errs() << "[Critical Error] Expected 1 starting Operation, got " << startingOps.size() << "\n";
   data.startingOp = startingOps[0];
   
-  for(auto arch_item : info.archs) {
+  for(auto arch_item : myInfo.archs) {
     llvm::errs() << "Source: " << arch_item.srcBB << ", Destination: " << arch_item.dstBB << "\n";
   }
 
@@ -675,8 +771,8 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   llvm::errs() << "Current count: " << data.someCountOfSomething << "\n";
 
   //data.sharing_feedback = info.sharing_info;
-  data.archs = info.archs;
-  data.funcOp = info.funcOp;
+  data.archs = myInfo.archs;
+  data.funcOp = myInfo.funcOp;
 
   data.someCountOfSomething += 20;
   delete milp;
@@ -776,7 +872,9 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
         //iterate over combinations of groups
         for(auto pair : combinations(&set)) {
           //check if sharing is potentially possible
-          if(checkOccupancySum(pair.first, pair.second, op_type.op_latency)) {
+          double occupancy_sum = pair.first->shared_occupancy + pair.second->shared_occupancy;
+          //change to separate function!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+          if(occupancy_sum <= op_type.op_latency) {
             std::vector<Operation*> finalOrd;
             //check if operations on loop
             if(!pair.first->hasCycle && !pair.second->hasCycle) {
@@ -786,7 +884,6 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
                 llvm::errs() << "[info] Failed topological sorting\n";
               }
               groups_modified = true;
-              //run_performance analysis here !!!!!!!!!!!!!!!!!!!! -> buffer placement
             } else {
               llvm::errs() << "[comp] Cyclic\n";
               // Search for best group ordering
@@ -794,6 +891,7 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
               current_permutation.insert(current_permutation.end(), pair.first->items.begin(), pair.first->items.end());
               current_permutation.insert(current_permutation.end(), pair.second->items.begin(), pair.second->items.end());
               std::sort(current_permutation.begin(), current_permutation.end());
+              //seperate function for permutations!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
               do { 
                 //Print out current permutation
                 llvm::errs() << "[Permutation] Start\n";
@@ -803,7 +901,15 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
                 llvm::errs() << "\n";
 
                 //run_performance analysis here !!!!!!!!!!!!!!!!!!!
+                dynamatic::sharing::generate_performance_model(&builder, current_permutation);
+                dynamatic::sharing::deleteAllBuffers(data.funcOp);
+                if (failed(pm.run(modOp))) {
+                  return signalPassFailure();
+                }
+                dynamatic::sharing::destroy_performance_model(&builder, current_permutation);
                 //check if no performance loss, if yes, break
+                ResourceSharing temp_sharing;
+                temp_sharing.retrieveDataFromPerformanceAnalysis(data.sharing_feedback, SCC, number_of_SCC, timingDB);
                 if(true) {
                   finalOrd = current_permutation;
                   break;

@@ -382,9 +382,6 @@ FPGA20Buffers::addElasticityConstraints(ValueRange elasticChannels,
     GRBVar &present = chVars.bufPresent;
     GRBVar &opaque = chVars.bufIsOpaque;
     GRBVar &numSlots = chVars.bufNumSlots;
-    if(std::find(funcInfo.opaqueChannel.begin(), funcInfo.opaqueChannel.end(), channel) != funcInfo.opaqueChannel.end()) {
-      model.addConstr(opaque == 1.0, "additional_opaque_channel");
-    }
     // If there is an opaque buffer on the channel, the channel elastic
     // arrival time at the ouput must be greater than at the input (breaks
     // cycles!)
@@ -592,40 +589,6 @@ void FPGA20Buffers::logResults(DenseMap<Value, PlacementResult> &placement) {
     }
     os.unindent();
     os << "\n";
-  }
-
-  std::error_code ec;
-  std::string sep = path::get_separator().str();
-  std::string fp =
-      "buffer-placement" + sep + funcInfo.funcOp.getName().str() + sep;
-  Logger occupancyLogger(fp + "occupancy.csv", ec);
-  llvm::errs() << "File path: " << fp;
-
-  (*occupancyLogger) << "cfdfc,name,occupancy\n";
-  
-  //std::vector<Op_stats> occupancy_info;
-  // Log token occupancy of all (pipelined) units in all CFDFCs
-  ResourceSharingInfo::OpSpecific sharing_item;
-  double throughput;
-  for (auto [idx, cfdfcWithVars] : llvm::enumerate(vars.cfdfcs)) {
-    auto [cf, cfVars] = cfdfcWithVars;
-    (*occupancyLogger) << "Per-unit occupancy of CFDFC #" << idx << ":\n";
-    // for each CFDFC, extract the throughput in double format
-    throughput = cfVars.throughput.get(GRB_DoubleAttr_X);
-    funcInfo.sharing_info.sharing_check[idx] = throughput;
-    
-    for (auto &[op, unitVars] : cfVars.units) {
-      sharing_item.op = op;
-      if (failed(timingDB.getLatency(op, sharing_item.op_latency)) || sharing_item.op_latency == 0.0)
-        continue;
-      // the occupancy of the unit is calculated as the product between
-      // throughput and latency
-      sharing_item.occupancy = sharing_item.op_latency * throughput;
-      funcInfo.sharing_info.sharing_init.push_back(sharing_item);
-      (*occupancyLogger) << nameUniquer.getName(*sharing_item.op).str() << ": " << sharing_item.occupancy << "\n";
-
-    }
-    llvm::errs() << "Hi: " << nameUniquer.getName(*sharing_item.op).str() << ": " << sharing_item.occupancy << "\n";
   }
 }
 #endif // DYNAMATIC_GUROBI_NOT_INSTALLED

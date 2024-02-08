@@ -50,34 +50,6 @@ struct PlacementResult {
   bool opaqueBeforeTrans = true;
 };
 
-//stores/transfers information needed for resource sharing
-struct ResourceSharingInfo {
-  
-  // for each CFDFC, store the throughput in double format to 
-  // double format to compare 
-  std::map<int, double> sharing_check{};
-  
-  //store stats of each operation
-  struct OpSpecific {
-    mlir::Operation* op; 
-    double occupancy; 
-    double op_latency;
-    //double throughput;
-
-    void print() {
-      llvm::errs() << "Operation " << op 
-                  << ", occupancy: " << occupancy 
-                  << ", latency: " << op_latency 
-                  << ", block: " << getLogicBB(op)
-                  << "\n";
-    }
-  };
-  std::vector<OpSpecific> sharing_init;
-
-  //constructor
-  ResourceSharingInfo() = default;
-};
-
 /// Helper datatype for buffer placement. Simply aggregates all the information
 /// related to the Handshake function under optimization.
 struct FuncInfo {
@@ -89,10 +61,6 @@ struct FuncInfo {
   /// Maps CFDFCs of the function to a boolean indicating whether they each
   /// should be optimized.
   llvm::MapVector<CFDFC *, bool> cfdfcs;
-  //vector used to transfer important resource sharing parameters
-  ResourceSharingInfo sharing_info;
-
-  std::vector<Value> opaqueChannel;
 
   /// Argument-less constructor so that we can use the struct as a value type
   /// for maps.

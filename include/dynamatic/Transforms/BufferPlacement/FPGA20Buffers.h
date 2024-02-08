@@ -161,7 +161,7 @@ protected:
   /// Adds elasticity constraints for all provided channels and units to the
   /// Gurobi model. All channels and units must be part of the Handshake
   /// function under consideration.
-  LogicalResult addElasticityConstraints(ValueRange elasticChannels,
+  virtual LogicalResult addElasticityConstraints(ValueRange elasticChannels,
                                          ArrayRef<Operation *> elasticUnits);
 
   /// Adds throughput constraints for the provided CFDFC to the Gurobi model.
