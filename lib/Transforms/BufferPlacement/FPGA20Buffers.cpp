@@ -188,6 +188,7 @@ LogicalResult FPGA20Buffers::createCFDFCVars(CFDFC &cfdfc, unsigned uid) {
     double latency;
     if (failed(timingDB.getLatency(unit, latency)))
       latency = 0.0;
+    
     if (latency == 0.0)
       unitVar.retOut = unitVar.retIn;
     else
@@ -311,7 +312,7 @@ FPGA20Buffers::addPathConstraints(ValueRange pathChannels,
     double latency;
     if (failed(timingDB.getLatency(op, latency)))
       latency = 0.0;
-
+    
     if (latency == 0.0) {
       double dataDelay;
       if (failed(timingDB.getTotalDelay(op, SignalType::DATA, dataDelay)))
@@ -381,7 +382,9 @@ FPGA20Buffers::addElasticityConstraints(ValueRange elasticChannels,
     GRBVar &present = chVars.bufPresent;
     GRBVar &opaque = chVars.bufIsOpaque;
     GRBVar &numSlots = chVars.bufNumSlots;
-
+    if(std::find(funcInfo.opaqueChannel.begin(), funcInfo.opaqueChannel.end(), channel) != funcInfo.opaqueChannel.end()) {
+      model.addConstr(opaque == 1.0, "additional_opaque_channel");
+    }
     // If there is an opaque buffer on the channel, the channel elastic
     // arrival time at the ouput must be greater than at the input (breaks
     // cycles!)
@@ -391,6 +394,7 @@ FPGA20Buffers::addElasticityConstraints(ValueRange elasticChannels,
     // If there is at least one slot, there must be a buffer
     model.addConstr(present >= 0.01 * numSlots, "elastic_present");
   }
+
 
   // Add an elasticity constraint for every input/output port pair in the
   // elastic units
@@ -454,9 +458,9 @@ LogicalResult FPGA20Buffers::addThroughputConstraints(CFDFC &cfdfc) {
   // Add a constraint for each pipelined CFDFC unit
   for (auto &[op, unitVars] : cfdfcVars.units) {
     double latency;
-    if (failed(timingDB.getLatency(op, latency)) || latency == 0.0)
-      continue;
-
+      if (failed(timingDB.getLatency(op, latency)) || latency == 0.0)
+        continue;
+  
     GRBVar &retIn = unitVars.retIn;
     GRBVar &retOut = unitVars.retOut;
     GRBVar &throughput = cfdfcVars.throughput;
@@ -570,7 +574,7 @@ void FPGA20Buffers::logResults(DenseMap<Value, PlacementResult> &placement) {
   for (auto [idx, cfdfcWithVars] : llvm::enumerate(vars.cfdfcs)) {
     auto [cf, cfVars] = cfdfcWithVars;
     double throughput = cfVars.throughput.get(GRB_DoubleAttr_X);
-    os << "Throughput of CFDFC #" << idx << ": " << throughput << "\n";
+    llvm::errs() << "Throughput of CFDFC #" << idx << ": " << throughput << "\n";
   }
 
   os << "\n# =================== #\n";

@@ -20,6 +20,25 @@
 #include "dynamatic/Transforms/BufferPlacement/HandshakeIterativeBuffers.h"
 #include "circt/Dialect/Handshake/HandshakeOps.h"
 #include "mlir/IR/MLIRContext.h"
+namespace dynamatic {
+namespace sharing {
+struct controlStructure {
+    mlir::Value control_merge;
+    mlir::Value control_branch;
+    mlir::Value current_position;
+};
+std::optional<unsigned> getLogicBB(Operation *op);
+
+void initialize_modification(std::map<int, controlStructure> control_map);
+void revert_to_initial_state();
+
+std::vector<Value> generate_performance_model(OpBuilder* builder, std::vector<mlir::Operation*>& items);
+void destroy_performance_model(OpBuilder* builder, std::vector<mlir::Operation*>& items);
+
+Value generate_performance_step(OpBuilder* builder, mlir::Operation *op);
+void revert_performance_step(OpBuilder* builder, mlir::Operation *op);
+
+mlir::OpResult add_fork(OpBuilder* builder, mlir::OpResult connectionPoint);
 
 mlir::OpResult extend_fork(OpBuilder* builder, ForkOp OldFork);
 
@@ -29,6 +48,11 @@ mlir::OpResult addConst(OpBuilder* builder, mlir::OpResult* connectionPoint, int
 
 mlir::OpResult addBranch(OpBuilder* builder, mlir::OpResult* connectionPoint);
 
+mlir::OpResult addMerge(OpBuilder* builder, mlir::OpResult* connectionPoint);
+
+void deleteAllBuffers(FuncOp funcOp);
+}
+}
 
 
 #endif // INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_MODIR_H

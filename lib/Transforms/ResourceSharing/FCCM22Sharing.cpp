@@ -14,6 +14,7 @@
  *  -
  */
 
+#include "dynamatic/Support/NameUniquer.h"
 #include "dynamatic/Transforms/ResourceSharing/FCCM22Sharing.h"
 #include "dynamatic/Transforms/ResourceSharing/SCC.h"
 #include "dynamatic/Transforms/ResourceSharing/modIR.h"
@@ -86,14 +87,43 @@ using namespace dynamatic::experimental;
 
 //std::max
 #include <algorithm>
+namespace dynamatic {
+namespace buffer {
+namespace fpga20 {
+  class MyFPGA20Buffers : public FPGA20Buffers {
+    using FPGA20Buffers::FPGA20Buffers;
+    //protected:
+    //void logResults(DenseMap<Value, PlacementResult> &placement) override;
+    public:
+    std::vector<ResourceSharingInfo::OpSpecific> getData();
+  };
+  std::vector<ResourceSharingInfo::OpSpecific> MyFPGA20Buffers::getData() {
+    std::vector<ResourceSharingInfo::OpSpecific> return_info;
+    ResourceSharingInfo::OpSpecific sharing_item;
+    double throughput;
+    for (auto [idx, cfdfcWithVars] : llvm::enumerate(vars.cfdfcs)) {
+      auto [cf, cfVars] = cfdfcWithVars;
+      // for each CFDFC, extract the throughput in double format
+      throughput = cfVars.throughput.get(GRB_DoubleAttr_X);
+      funcInfo.sharing_info.sharing_check[idx] = throughput;
+      
+      for (auto &[op, unitVars] : cfVars.units) {
+        sharing_item.op = op;
+        if (failed(timingDB.getLatency(op, sharing_item.op_latency)) || sharing_item.op_latency == 0.0)
+          continue;
+        // the occupancy of the unit is calculated as the product between
+        // throughput and latency
+        sharing_item.occupancy = sharing_item.op_latency * throughput;
+        return_info.push_back(sharing_item);
+      }
+    }
+    return return_info;
+  }
+}
+}
+}
 
 namespace {
-
-std::optional<unsigned> getLogicBB(Operation *op) {
-  if (auto bb = op->getAttrOfType<mlir::IntegerAttr>(BB_ATTR))
-    return bb.getUInt();
-  return {};
-}
 
 /// Recovered data needed for performing resource sharing
 struct ResourceSharing_Data {
@@ -105,6 +135,9 @@ struct ResourceSharing_Data {
   unsigned someCountOfSomething = 0;
   unsigned totalNumberOfOpaqueBuffers = 0;
   Operation *startingOp;
+  std::map<int, dynamatic::sharing::controlStructure> control_map;
+  FuncOp funcOp;
+  std::vector<Value> opaqueChannel = {};
 };
 
 struct ResourceSharingFCCM22PerformancePass : public HandshakePlaceBuffersPass {
@@ -547,7 +580,7 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
     DenseMap<Value, PlacementResult> &placement) {
   /// This is exactly the same as the getBufferPlacement method in
   /// HandshakePlaceBuffersPass
-
+  info.opaqueChannel = data.opaqueChannel;
   // Create Gurobi environment
   GRBEnv env = GRBEnv(true);
   env.set(GRB_IntParam_OutputFlag, 0);
@@ -556,12 +589,12 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   env.start();
 
   // Create and solve the MILP
-  BufferPlacementMILP *milp = nullptr;
+  fpga20::MyFPGA20Buffers *milp = nullptr;
   if (algorithm == "fpga20")
-    milp = new fpga20::FPGA20Buffers(info, timingDB, env, logger, targetCP,
+    milp = new fpga20::MyFPGA20Buffers(info, timingDB, env, logger, targetCP,
                                      targetCP * 2.0, false);
   else if (algorithm == "fpga20-legacy")
-    milp = new fpga20::FPGA20Buffers(info, timingDB, env, logger, targetCP,
+    milp = new fpga20::MyFPGA20Buffers(info, timingDB, env, logger, targetCP,
                                      targetCP * 2.0, true);
   assert(milp && "unknown placement algorithm");
   int milpStat;
@@ -574,10 +607,36 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
     res = info.funcOp->emitError()
           << "Failed to extract placement decisions from MILP's solution.";
   }
+  data.sharing_feedback.sharing_init = milp->getData();
   
+  NameUniquer names(info.funcOp);
+  dynamatic::sharing::controlStructure control_item;
+  unsigned int BB_idx = 0;
   // Walkin' in the IR:
   llvm::errs() << "Walkin' inside the IR:\n";
   for (Operation &op : info.funcOp.getOps()) {
+    if(op.getName().getStringRef() == "handshake.merge" || op.getName().getStringRef() == "handshake.control_merge") {
+      for (const auto &u : op.getResults()) {
+        if(u.getType().isa<NoneType>()) {
+          for(auto &item : u.getUses())
+             llvm::errs() << "This is a control channel " << names.getName(op) << " -> " << names.getName(*item.getOwner()) <<"\n";
+             BB_idx = getLogicBB(&op).value();
+             control_item.control_merge = u;
+        }
+      }
+    }
+    if(op.getName().getStringRef() == "handshake.br" || op.getName().getStringRef() == "handshake.cond_br") {
+      for (const auto &u : op.getOperands()) {
+        if(u.getType().isa<NoneType>()) {
+            llvm::errs() << "This is a * control channel " << names.getName(op) << " <- " << names.getName(*u.getDefiningOp()) <<"\n";
+            if(BB_idx != getLogicBB(&op).value()) {
+              llvm::errs() << "[critical Error] control channel not present\n";
+            }
+            control_item.control_branch = u;
+            data.control_map[BB_idx] = control_item;
+        }
+      }
+    }
     llvm::errs() << "Operation" << op << "\n";
     std::vector<Operation *> opsToProcess;
     for (auto &u : op.getResults().getUses())
@@ -615,8 +674,9 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   data.someCountOfSomething += 10;
   llvm::errs() << "Current count: " << data.someCountOfSomething << "\n";
 
-  data.sharing_feedback = info.sharing_info;
+  //data.sharing_feedback = info.sharing_info;
   data.archs = info.archs;
+  data.funcOp = info.funcOp;
 
   data.someCountOfSomething += 20;
   delete milp;
@@ -647,6 +707,7 @@ struct ResourceSharingFCCM22Pass
 } // namespace
 
 void ResourceSharingFCCM22Pass::runOnOperation() {
+  OpBuilder builder(&getContext());
   llvm::errs() << "***** Resource Sharing *****\n";
   ModuleOp modOp = getOperation();
   ResourceSharing_Data data;
@@ -663,10 +724,14 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
     pm.addPass(std::make_unique<ResourceSharingFCCM22PerformancePass>(
         data, algorithm, frequencies, timingModels, firstCFDFC, targetCP,
         timeout, dumpLogs));
-    if (failed(pm.run(modOp))) {
-      return signalPassFailure();
+    for(int i = 0; i < 3; i++) {
+      if (failed(pm.run(modOp))) {
+        return signalPassFailure();
+      }
+
     }
-    
+  
+    NameUniquer names(data.funcOp);
     std::unordered_map<mlir::Operation*, double> data_mod;
     for(auto item : data.sharing_feedback.sharing_init) {
       if (data_mod.find(item.op) != data_mod.end()) {
@@ -676,6 +741,9 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
       }
     }
     
+    initialize_modification(data.control_map);
+    dynamatic::sharing::revert_to_initial_state();
+
     ResourceSharing sharing;
     sharing.setFirstOp(data.startingOp);
 
@@ -696,7 +764,7 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
     int number_of_SCC = SCC.size();
     
     sharing.retrieveDataFromPerformanceAnalysis(data.sharing_feedback, SCC, number_of_SCC, timingDB);
-   
+    sharing.print();
    // iterating over different operation types
    for(auto& op_type : sharing.operation_types) {
     // Sharing within a loop nest
@@ -732,7 +800,7 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
                 for(auto op : current_permutation) {
                   llvm::errs() << op << ", ";
                 }
-                llvm::errs() << *"\n";
+                llvm::errs() << "\n";
 
                 //run_performance analysis here !!!!!!!!!!!!!!!!!!!
                 //check if no performance loss, if yes, break
@@ -761,6 +829,22 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
     op_type.sharingOtherUnits();
 
     op_type.printFinalGroup();
+
+    //here we want to create the performance model
+    //auto op = op_type.final_grouping.groups.begin()->items[0];
+    std::vector<Value> return_values = {};
+    for (auto op :
+      llvm::make_early_inc_range(data.funcOp.getOps<arith::MulIOp>())) {
+        return_values.push_back(dynamatic::sharing::generate_performance_step(&builder, op));
+      }
+
+    data.opaqueChannel = return_values;
+    dynamatic::sharing::deleteAllBuffers(data.funcOp);
+    if (failed(pm.run(modOp))) {
+      return signalPassFailure();
+    }
+    //dynamatic::sharing::revert_performance_step(&builder, op);
+    break;
    }
 }
 

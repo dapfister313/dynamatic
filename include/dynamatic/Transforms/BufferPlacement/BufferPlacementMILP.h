@@ -92,6 +92,8 @@ struct FuncInfo {
   //vector used to transfer important resource sharing parameters
   ResourceSharingInfo sharing_info;
 
+  std::vector<Value> opaqueChannel;
+
   /// Argument-less constructor so that we can use the struct as a value type
   /// for maps.
   FuncInfo() : funcOp(nullptr) {};
