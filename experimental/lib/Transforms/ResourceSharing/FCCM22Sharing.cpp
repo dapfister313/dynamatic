@@ -128,7 +128,7 @@ namespace fpga20 {
       // for each CFDFC, extract the throughput in double format
       throughput = cfVars.throughput.get(GRB_DoubleAttr_X);
       //funcInfo.sharing_info.sharing_check[idx] = throughput;
-      
+
       for (auto &[op, unitVars] : cfVars.unitVars) {
         sharing_item.op = op;
         if (failed(timingDB.getLatency(op, SignalType::DATA, sharing_item.op_latency)) || sharing_item.op_latency == 0.0)
@@ -195,7 +195,7 @@ namespace {
 /// Recovered data needed for performing resource sharing
 struct ResourceSharing_Data {
   //extracts needed resource sharing data from FuncInfo struct
-  ResourceSharingInfo sharing_feedback; 
+  ResourceSharingInfo sharing_feedback;
   //used to perform SCC-computation (finding strongly connected components)
   SmallVector<dynamatic::experimental::ArchBB> archs;
 
@@ -236,7 +236,7 @@ struct Group {
   std::vector<mlir::Operation*> items;
   double shared_occupancy;
   bool hasCycle;
-  
+
   bool recursivelyDetermineIfCyclic(mlir::Operation* op, std::set<mlir::Operation*>& node_visited, mlir::Operation* ouc) {
     node_visited.insert(op);
     for (auto &u : op->getResults().getUses()) {
@@ -280,7 +280,7 @@ struct Group {
         : shared_occupancy(-1) {
           items.push_back(op);
           hasCycle = determineIfCyclic(op);
-        }     
+        }
 
   //Destructor
   ~Group() {};
@@ -298,7 +298,7 @@ struct Set {
   std::list<Group> groups{};
   int SCC_id;
   double op_latency;
- 
+
   void addGroup(Group group) {
     groups.push_back(group);
   }
@@ -326,10 +326,10 @@ struct Set {
 
   void joinSet(Set *joined_element) {
     GroupIt pelem = groups.begin();
-    for(GroupIt jelem = joined_element->groups.begin(); 
+    for(GroupIt jelem = joined_element->groups.begin();
         jelem != joined_element->groups.end(); pelem++, jelem++) {
-      pelem->items.insert(pelem->items.end(), 
-                          jelem->items.begin(), 
+      pelem->items.insert(pelem->items.end(),
+                          jelem->items.begin(),
                           jelem->items.end()
                           );
     }
@@ -355,7 +355,7 @@ struct Set {
  }
 
 /*
-       Each operation type (e.g. mul, add, load) 
+       Each operation type (e.g. mul, add, load)
        can be treated separately
 */
 struct OpSelector {
@@ -365,7 +365,7 @@ struct OpSelector {
   std::map<int, int> SetSelect;
   Set final_grouping;
   std::list<mlir::Operation*> Ops_not_on_CFG;
-  
+
   void addSet(Group group) {
     sets.push_back(Set(group));
   }
@@ -374,7 +374,7 @@ struct OpSelector {
   OpSelector(double latency, llvm::StringRef identifier)
         : op_latency(latency), identifier(identifier), final_grouping(Set(latency)) {
         }
-  
+
   void print() {
     llvm::errs() << identifier << "\n";
     for(auto set : sets) {
@@ -407,7 +407,7 @@ struct OpSelector {
     if(!number_of_sets) {
       return;
     }
-    
+
     int max_set_size = -1;
     int max_idx = -1;
     for(int i = 0; i < number_of_sets; i++) {
@@ -416,7 +416,7 @@ struct OpSelector {
         max_idx = i;
       }
     }
-    //choose initial set 
+    //choose initial set
     final_grouping = sets[max_idx];
 
     for(int i = 0; i < number_of_sets; i++) {
@@ -425,7 +425,7 @@ struct OpSelector {
       }
       final_grouping.joinSet(&sets[i]);
     }
-  
+
   }
 
   void sharingOtherUnits() {
@@ -441,7 +441,7 @@ struct OpSelector {
 };
 
 /*
-       Class to iterate easily trough all 
+       Class to iterate easily trough all
        operation types
 */
 class ResourceSharing {
@@ -457,16 +457,16 @@ class ResourceSharing {
   Operation *firstOp = nullptr;
   //Operations in topological order
   std::map<Operation *, unsigned int> OpTopologicalOrder;
-  
+
   double runPerformanceAnalysis() {
     return 0;
   }
-  
+
   //used to run topological sorting
   void recursiveDFStravel(Operation *op, unsigned int *position, std::set<mlir::Operation*>& node_visited) {
     //add operation
     node_visited.insert(op);
-    
+
     //DFS over all child ops
     for (auto &u : op->getResults().getUses()) {
       Operation *child_op = u.getOwner();
@@ -484,7 +484,7 @@ class ResourceSharing {
 
 public:
   std::vector<OpSelector> operation_types;
-  
+
   void setFirstOp(Operation *op) {
     firstOp = op;
   }
@@ -509,9 +509,9 @@ public:
       llvm::errs() << id << " : " << op << "\n";
     }
   }
-  
+
   /*
-   * if neighter group 1 nor group 2 are cyclic, we can find a 
+   * if neighter group 1 nor group 2 are cyclic, we can find a
    * (not neccesarily unique) topolocical ordering
    */
    std::vector<Operation*> sortTopologically(GroupIt group1, GroupIt group2) {
@@ -545,15 +545,15 @@ public:
 
     //everytime we place/overwrite data, initial number of operation types is 0;
     number_of_operation_types = 0;
-    
+
     //iterate through all retrieved operations
     for(auto sharing_item : data_mod) {
       //choose the right operation type
-      
+
       double latency;
       if (failed(timingDB.getLatency(sharing_item.first, SignalType::DATA, latency)))
         latency = 0.0;
-      
+
       llvm::StringRef OpName = sharing_item.first->getName().getStringRef();
       Group group_item = Group(sharing_item.first, sharing_item.second.first);
       int OpIdx = -1;
@@ -567,7 +567,7 @@ public:
         operation_types.push_back(OpSelector(sharing_item.second.second, OpName));
       }
       OpSelector& OpT = operation_types[OpIdx];
-      
+
       //choose the right set
       int SetIdx = -1;
       unsigned int BB = getLogicBB(sharing_item.first).value();
@@ -592,7 +592,7 @@ public:
     }
     throughput = sharing_feedback.sharing_check;
   }
-  
+
   //return number of Basic Blocks
   int getNumberOfBasicBlocks() {
     unsigned int maximum = 0;
@@ -606,7 +606,7 @@ public:
   void getListOfControlFlowEdges(SmallVector<dynamatic::experimental::ArchBB> archs_ext) {
     archs = archs_ext;
   }
- 
+
   std::vector<int> performSCC_bbl() {
     return Kosarajus_algorithm_BBL(archs);
   }
@@ -614,7 +614,7 @@ public:
   void performSCC_opl(std::set<mlir::Operation*>& result) {
     Kosarajus_algorithm_OPL(firstOp, result, OpTopologicalOrder);
   }
-  
+
   void print() {
     llvm::errs() << "\n***** Basic Blocks *****\n";
     for(auto arch_item : archs) {
@@ -681,7 +681,7 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   }
   */
   data.sharing_feedback.sharing_init = milp->getData();
-  
+
   //NameUniquer names(myInfo.funcOp);
   controlStructure control_item;
   unsigned int BB_idx = 0;
@@ -722,7 +722,7 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   // and store it into your MyData& reference. If you need to extract variable
   // values from the MILP you may need to make some of its fields public (to
   // be discussed in PRs).
-  
+
   // If we are in the entry block, we can use the start input of the
   // function (last argument) as our control value
   assert(myInfo.funcOp.getArguments().back().getType().isa<NoneType>() &&
@@ -735,7 +735,7 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   if(startingOps.size() != 1)
     llvm::errs() << "[Critical Error] Expected 1 starting Operation, got " << startingOps.size() << "\n";
   data.startingOp = startingOps[0];
-  
+
   for(auto arch_item : myInfo.archs) {
     llvm::errs() << "Source: " << arch_item.srcBB << ", Destination: " << arch_item.dstBB << "\n";
   }
@@ -753,7 +753,7 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   return success();
 }
 
-namespace { 
+namespace {
 
 struct ResourceSharingFCCM22Pass
     : public dynamatic::experimental::sharing::impl::ResourceSharingFCCM22Base<
@@ -772,22 +772,22 @@ struct ResourceSharingFCCM22Pass
     this->dumpLogs = dumpLogs;
   }
 
-  void runOnOperation() override;
+  void runDynamaticPass() override;
 };
 } // namespace
 
-void ResourceSharingFCCM22Pass::runOnOperation() {
+void ResourceSharingFCCM22Pass::runDynamaticPass() {
   OpBuilder builder(&getContext());
   llvm::errs() << "***** Resource Sharing *****\n";
   ModuleOp modOp = getOperation();
   ResourceSharing_Data data;
-  
+
 
   TimingDatabase timingDB(&getContext());
   if (failed(TimingDatabase::readFromJSON(timingModels, timingDB)))
     return signalPassFailure();
 
-  
+
     // Data object to extract information from buffer placement
     // Use a pass manager to run buffer placement on the current module
     PassManager pm(&getContext());
@@ -800,7 +800,7 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
       }
 
     }
-  
+
     //NameUniquer names(data.funcOp);
     std::unordered_map<mlir::Operation*, double> data_mod;
     for(auto item : data.sharing_feedback.sharing_init) {
@@ -810,7 +810,7 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
         data_mod[item.op] = item.occupancy;
       }
     }
-    
+
     initialize_modification(data.control_map);
     revert_to_initial_state();
 
@@ -826,13 +826,13 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
     sharing.getListOfControlFlowEdges(data.archs);
     int number_of_basic_blocks = sharing.getNumberOfBasicBlocks();
     llvm::errs() << "Number of BBs: " << number_of_basic_blocks << "\n";
-    
+
     //perform SCC computation
     std::vector<int> SCC = sharing.performSCC_bbl();
 
     //get number of strongly connected components
     int number_of_SCC = SCC.size();
-    
+
     sharing.retrieveDataFromPerformanceAnalysis(data.sharing_feedback, SCC, number_of_SCC, timingDB);
     sharing.print();
    // iterating over different operation types
@@ -866,7 +866,7 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
               current_permutation.insert(current_permutation.end(), pair.second->items.begin(), pair.second->items.end());
               std::sort(current_permutation.begin(), current_permutation.end());
               //seperate function for permutations!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-              do { 
+              do {
                 //Print out current permutation
                 llvm::errs() << "[Permutation] Start\n";
                 for(auto op : current_permutation) {
@@ -892,8 +892,8 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
             }
             if(finalOrd.size() != 0) {
                 //Merge groups, update ordering and update shared occupancy
-                set.joinGroups(pair.first, pair.second, finalOrd);   
-                break;          
+                set.joinGroups(pair.first, pair.second, finalOrd);
+                break;
             }
           }
         }
@@ -904,7 +904,7 @@ void ResourceSharingFCCM22Pass::runOnOperation() {
     op_type.sharingAcrossLoopNests();
 
     op_type.printFinalGroup();
-    
+
     // Sharing other units
     op_type.sharingOtherUnits();
 

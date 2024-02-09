@@ -21,6 +21,12 @@ using namespace dynamatic::handshake;
 using namespace llvm;
 using namespace dynamatic;
 
+
+namespace dynamatic {
+namespace experimental {
+namespace sharing {
+
+
 /*
  * Dumps content of vector of lists to the console
  */
@@ -63,7 +69,7 @@ unsigned int getNumberOfBBs(SmallVector<ArchBB> archs) {
 
 /*
  * Input: Container with source/destination Basic Blocks of each Edge between Basic Blocks
- * Output: vector of lists, vector[n] stores all destination Basic Blocks, where the 
+ * Output: vector of lists, vector[n] stores all destination Basic Blocks, where the
  *         source Basic Block is the n.th Basic Block
  * Example: (In: (0,1),(1,2),(2,2),(2,3) )
              Out:  0: 1
@@ -81,7 +87,7 @@ std::vector<std::list<int>> create_adjacency_list_bbl(SmallVector<ArchBB> archs,
 
 /*
  * This function simply converts a vector to a list
- * Use: This function is a version of create_adjacency_list_bbl to test 
+ * Use: This function is a version of create_adjacency_list_bbl to test
  *      the algorithm (see top of this file) using "geeks for geeks"
  */
 std::vector<std::list<int>> create_adjacency_list_gfg(std::vector<std::vector<int>>& adj, int V) {
@@ -102,7 +108,7 @@ std::vector<std::list<int>> create_adjacency_list_gfg(std::vector<std::vector<in
  *                 |       then 4, where we can no longer travel, we push
  *                 3       Node 4 on the stack, return to 2, travel to 3,
  *                         where we are again stuck, we push 3.
- *                         We return to 2 and as we already visited 1,3,4 
+ *                         We return to 2 and as we already visited 1,3,4
  *                         we are stuck again and push 2, we finally return
  *                         to Node 1 and push 1 to the stack
  *                         Output: 4,3,2,1
@@ -120,7 +126,7 @@ void firstRecursiveDFStravel(std::stack<int>& DFSstack, std::vector<bool>& node_
 }
 
 /*
- * First we choose the starting node for our algorithm. As we are working with an IR, all nodes are 
+ * First we choose the starting node for our algorithm. As we are working with an IR, all nodes are
  * reachable from node 0, aka start.
  * Then we are just calling function firstRecursiveDFStravel
  */
@@ -191,7 +197,7 @@ std::vector<std::list<int>> secondDFStravel(std::vector<std::list<int>> transpos
         int current_node = DFSstack.top();
         DFSstack.pop();
         if(node_visited[current_node]) {
-            continue;  
+            continue;
         }
         node_visited[current_node] = true;
         std::list<int> currSCC;
@@ -243,13 +249,13 @@ std::vector<int> Kosarajus_algorithm_BBL(SmallVector<ArchBB> archs) {
 void recursive_list_creator_opl(mlir::Operation* currOp, std::vector<std::list<int>>& adjacency_list, std::map<mlir::Operation*, int>& conversions, int* map_size, std::set<mlir::Operation*>& node_visited, std::map<Operation *, unsigned int>& topological_sort, int *sorting_idx, std::stack<int>& DFSstack) {
     node_visited.insert(currOp);
     int op_idx = conversions.find(currOp)->second;
-    for (auto &u : currOp->getResults().getUses()) { 
+    for (auto &u : currOp->getResults().getUses()) {
         //get child operation
         Operation *child_op = u.getOwner();
 
         //update adjacency list
         int child_idx = -1;
-        auto cit = conversions.find(child_op); 
+        auto cit = conversions.find(child_op);
         if(cit == conversions.end()) {
             //operation not yet present
             conversions[child_op] = *map_size;
@@ -260,7 +266,7 @@ void recursive_list_creator_opl(mlir::Operation* currOp, std::vector<std::list<i
             child_idx = cit->second;
         }
         adjacency_list[op_idx].push_back(child_idx);
-        
+
         //traverse child operation if not yet done
         auto it = node_visited.find(child_op);
         if(it == node_visited.end()) {
@@ -317,3 +323,7 @@ void Kosarajus_algorithm_OPL(mlir::Operation* startOp, std::set<mlir::Operation*
     get_noncyclic_operations(adjacency_list, SCC, conversions, result);
     return;
 }
+
+} // namespace sharing
+} // namespace experimental
+} // namespace dynamatic

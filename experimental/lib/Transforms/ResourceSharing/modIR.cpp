@@ -5,9 +5,12 @@ using namespace dynamatic::experimental::sharing;
 
 std::map<int, controlStructure> modification_control_map;
 
+
 namespace dynamatic {
 namespace experimental {
 namespace sharing {
+
+
 
 void initialize_modification(std::map<int, controlStructure> control_map) {
   modification_control_map = control_map;
@@ -88,11 +91,11 @@ mlir::OpResult extend_fork(OpBuilder* builder, ForkOp OldFork) {
       std::vector<Operation *> opsToProcess;
       for (auto &u : OldFork.getResults().getUses())
         opsToProcess.push_back(u.getOwner());
-    
+
       // Insert fork after op
       builder->setInsertionPointAfter(opSrc);
       auto forkSize = opsToProcess.size();
-      
+
       auto newForkOp = builder->create<ForkOp>(opSrcIn.getLoc(), opSrcIn, forkSize + 1);
       inheritBB(opSrc, newForkOp);
       for (int i = 0, e = forkSize; i < e; ++i)
@@ -147,7 +150,7 @@ void deleteAllBuffers(FuncOp funcOp) {
   }
 }
 
-}
-}
-}
+} // namespace sharing
+} // namespace experimental
+} // namespace dynamatic
 

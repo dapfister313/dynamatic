@@ -22,9 +22,11 @@
 //#include "dynamatic/Transforms/BufferPlacement/HandshakeIterativeBuffers.h"
 #include "dynamatic/Dialect/Handshake/HandshakeOps.h"
 #include "mlir/IR/MLIRContext.h"
+
 namespace dynamatic {
 namespace experimental {
 namespace sharing {
+
 struct controlStructure {
     mlir::Value control_merge;
     mlir::Value control_branch;
@@ -54,9 +56,11 @@ mlir::OpResult addBranch(OpBuilder* builder, mlir::OpResult* connectionPoint);
 mlir::OpResult addMerge(OpBuilder* builder, mlir::OpResult* connectionPoint);
 
 void deleteAllBuffers(handshake::FuncOp funcOp);
-}
-}
-}
+
+} // namespace sharing
+} // namespace experimental
+} // namespace dynamatic
+
 
 
 #endif // INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_MODIR_H

@@ -18,42 +18,16 @@
 #include "mlir/Pass/Pass.h"
 #include "dynamatic/Support/CFG.h"
 
+using namespace dynamatic;
+
 
 namespace dynamatic {
 namespace experimental {
 namespace sharing {
 
-//stores/transfers information needed for resource sharing
-struct ResourceSharingInfo {
-
-// for each CFDFC, store the throughput in double format to 
-// double format to compare 
-std::map<int, double> sharing_check{};
-
-//store stats of each operation
-struct OpSpecific {
-    mlir::Operation* op; 
-    double occupancy; 
-    double op_latency;
-    //double throughput;
-
-    void print() {
-    llvm::errs() << "Operation " << op 
-                << ", occupancy: " << occupancy 
-                << ", latency: " << op_latency 
-                << ", block: " << getLogicBB(op)
-                << "\n";
-    }
-};
-std::vector<OpSpecific> sharing_init;
-
-//constructor
-ResourceSharingInfo() = default;
-};
-
 #define GEN_PASS_DECL_RESOURCESHARINGFCCM22
 #define GEN_PASS_DEF_RESOURCESHARINGFCCM22
-#include "dynamatic/Transforms/Passes.h.inc"
+#include "experimental/Transforms/Passes.h.inc"
 
 std::unique_ptr<dynamatic::DynamaticPass>
 createResourceSharingFCCM22Pass(StringRef algorithm = "fpga20",
@@ -65,5 +39,33 @@ createResourceSharingFCCM22Pass(StringRef algorithm = "fpga20",
 } // namespace sharing
 } // namespace experimental
 } // namespace dynamatic
+
+//stores/transfers information needed for resource sharing
+struct ResourceSharingInfo {
+
+// for each CFDFC, store the throughput in double format to
+// double format to compare
+std::map<int, double> sharing_check{};
+
+//store stats of each operation
+struct OpSpecific {
+    mlir::Operation* op;
+    double occupancy;
+    double op_latency;
+    //double throughput;
+
+    void print() {
+    llvm::errs() << "Operation " << op
+                << ", occupancy: " << occupancy
+                << ", latency: " << op_latency
+                << ", block: " << getLogicBB(op)
+                << "\n";
+    }
+};
+std::vector<OpSpecific> sharing_init;
+
+//constructor
+ResourceSharingInfo() = default;
+};
 
 #endif // INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_FCCM22SHARING_H
