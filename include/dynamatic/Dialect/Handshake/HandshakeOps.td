@@ -1108,8 +1108,9 @@ def SpeculatingBranchOp : Handshake_Op<"speculating_branch", [
 }
 
 def SyncOp : Handshake_Op<"sync", [
-  HasClock, DeclareOpInterfaceMethods<SOSTInterface>,
-  AllTypesMatch<["operands", "results"]>
+  HasClock, 
+  DeclareOpInterfaceMethods<InferTypeOpInterface, ["inferReturnTypes"]>,
+  DeclareOpInterfaceMethods<ControlInterface>, 
 ]> {
   let summary = "sync operation";
   let description = [{
