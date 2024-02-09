@@ -794,12 +794,11 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
     pm.addPass(std::make_unique<ResourceSharingFCCM22PerformancePass>(
         data, algorithm, frequencies, timingModels, firstCFDFC, targetCP,
         timeout, dumpLogs));
-    for(int i = 0; i < 3; i++) {
+    //for(int i = 0; i < 3; i++) {
       if (failed(pm.run(modOp))) {
         return signalPassFailure();
       }
-
-    }
+    //}
 
     //NameUniquer names(data.funcOp);
     std::unordered_map<mlir::Operation*, double> data_mod;
