@@ -7,20 +7,19 @@ using namespace dynamatic::buffer::fpga20;
 std::vector<ResourceSharingInfo::OperationData> MyFPGA20Buffers::getData() {
     std::vector<ResourceSharingInfo::OperationData> return_info;
     ResourceSharingInfo::OperationData sharing_item;
-    double throughput;
+    double throughput, latency;
     for (auto [idx, cfdfcWithVars] : llvm::enumerate(vars.cfVars)) {
         auto [cf, cfVars] = cfdfcWithVars;
         // for each CFDFC, extract the throughput in double format
         throughput = cfVars.throughput.get(GRB_DoubleAttr_X);
-        //funcInfo.sharing_info.sharing_check[idx] = throughput;
 
         for (auto &[op, unitVars] : cfVars.unitVars) {
         sharing_item.op = op;
-        if (failed(timingDB.getLatency(op, SignalType::DATA, sharing_item.op_latency)) || sharing_item.op_latency == 0.0)
+        if (failed(timingDB.getLatency(op, SignalType::DATA, latency)) || latency == 0.0)
             continue;
         // the occupancy of the unit is calculated as the product between
         // throughput and latency
-        sharing_item.occupancy = sharing_item.op_latency * throughput;
+        sharing_item.occupancy = latency * throughput;
         return_info.push_back(sharing_item);
         }
     }

@@ -5,7 +5,6 @@ using namespace dynamatic::experimental::sharing;
 void ResourceSharingInfo::OperationData::print() {
     llvm::errs() << "Operation " << op
                 << ", occupancy: " << occupancy
-                << ", latency: " << op_latency
                 << ", block: " << getLogicBB(op)
                 << "\n";
 }
@@ -190,13 +189,15 @@ bool ResourceSharing::isTopologicallySorted(std::vector<Operation*> Ops) {
 }
 
 void ResourceSharing::retrieveDataFromPerformanceAnalysis(ResourceSharingInfo sharing_feedback, std::vector<int>& SCC, int number_of_SCC, TimingDatabase timingDB) {
-    //Take biggest occupancy per operation
-    std::unordered_map<mlir::Operation*, std::pair<double,double>> data_mod;
-    for(auto item : sharing_feedback.sharing_init) {
-        if (data_mod.find(item.op) != data_mod.end()) {
-            data_mod[item.op].first = std::max(item.occupancy, data_mod[item.op].first);
+    // take biggest occupancy per operation
+    std::unordered_map<mlir::Operation*, double> uniqueOperation;
+    for(auto item : sharing_feedback.operations) {
+        if (uniqueOperation.find(item.op) != uniqueOperation.end()) {
+            // operation already present
+            uniqueOperation[item.op] = std::max(item.occupancy, uniqueOperation[item.op]);
         } else {
-            data_mod[item.op] = std::make_pair(item.occupancy, item.op_latency);
+            // add operation
+            uniqueOperation[item.op] = item.occupancy;
         }
     }
 
@@ -204,14 +205,14 @@ void ResourceSharing::retrieveDataFromPerformanceAnalysis(ResourceSharingInfo sh
     number_of_operation_types = 0;
 
     //iterate through all retrieved operations
-    for(auto sharing_item : data_mod) {
+    for(auto op : uniqueOperation) {
         //choose the right operation type
         double latency;
-        if (failed(timingDB.getLatency(sharing_item.first, SignalType::DATA, latency)))
+        if (failed(timingDB.getLatency(op.first, SignalType::DATA, latency)))
             latency = 0.0;
 
-        llvm::StringRef OpName = sharing_item.first->getName().getStringRef();
-        Group group_item = Group(sharing_item.first, sharing_item.second.first);
+        llvm::StringRef OpName = op.first->getName().getStringRef();
+        Group group_item = Group(op.first, op.second);
         int OpIdx = -1;
         auto item = OpNames.find(OpName);
         if(item != OpNames.end()) {
@@ -220,17 +221,17 @@ void ResourceSharing::retrieveDataFromPerformanceAnalysis(ResourceSharingInfo sh
             OpNames[OpName] = number_of_operation_types;
             OpIdx = number_of_operation_types;
             ++number_of_operation_types;
-            operation_types.push_back(OpSelector(sharing_item.second.second, OpName));
+            operation_types.push_back(OpSelector(latency, OpName));
         }
         OpSelector& OpT = operation_types[OpIdx];
 
         //choose the right set
         int SetIdx = -1;
-        unsigned int BB = getLogicBB(sharing_item.first).value();
+        unsigned int BB = getLogicBB(op.first).value();
         int SCC_idx = SCC[BB];
         if(SCC_idx == -1) {
             //Operation not part of a set
-            OpT.Ops_not_on_CFG.push_back(sharing_item.first);
+            OpT.Ops_not_on_CFG.push_back(op.first);
             continue;
         }
         auto set_select = OpT.SetSelect.find(SCC_idx);
@@ -246,7 +247,6 @@ void ResourceSharing::retrieveDataFromPerformanceAnalysis(ResourceSharingInfo sh
         //Simply add group to set
         SetT.groups.push_front(group_item);
     }
-    throughput = sharing_feedback.sharing_check;
 }
 
 int ResourceSharing::getNumberOfBasicBlocks() {

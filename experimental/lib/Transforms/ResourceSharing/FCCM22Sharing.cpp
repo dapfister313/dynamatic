@@ -131,7 +131,7 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   if (failed(milp->optimize()) || failed(milp->getResult(placement)))
     return failure();
  
-  data.sharing_init = milp->getData();
+  data.operations = milp->getData();
 
   controlStructure control_item;
   unsigned int BB_idx = 0;
@@ -235,20 +235,8 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
     pm.addPass(std::make_unique<ResourceSharingFCCM22PerformancePass>(
         data, algorithm, frequencies, timingModels, firstCFDFC, targetCP,
         timeout, dumpLogs));
-    //for(int i = 0; i < 3; i++) {
-      if (failed(pm.run(modOp))) {
+    if (failed(pm.run(modOp))) {
         return signalPassFailure();
-      }
-    //}
-
-    //NameUniquer names(data.funcOp);
-    std::unordered_map<mlir::Operation*, double> data_mod;
-    for(auto item : data.sharing_init) {
-      if (data_mod.find(item.op) != data_mod.end()) {
-        data_mod[item.op] = std::max(item.occupancy, data_mod[item.op]);
-      } else {
-        data_mod[item.op] = item.occupancy;
-      }
     }
 
     initialize_modification(data.control_map);

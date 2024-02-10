@@ -75,17 +75,16 @@ namespace sharing {
 //stores/transfers information needed for resource sharing
 struct ResourceSharingInfo {
     // for each CFDFC, store the throughput in double format to double format to compare
-    std::map<int, double> sharing_check{};
+    //std::map<int, double> sharing_check{};
 
     //store stats of each operation
     struct OperationData {
         mlir::Operation* op;
         double occupancy;
-        double op_latency;
 
         void print();
     };
-    std::vector<OperationData> sharing_init;
+    std::vector<OperationData> operations;
     
     //used to perform SCC-computation (finding strongly connected components)
     SmallVector<dynamatic::experimental::ArchBB> archs;
