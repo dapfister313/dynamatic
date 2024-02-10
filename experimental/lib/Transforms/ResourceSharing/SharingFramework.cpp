@@ -13,17 +13,17 @@ void Group::addOperation(mlir::Operation* op) {
     items.push_back(op);
 }
 
-bool Group::recursivelyDetermineIfCyclic(mlir::Operation* op, std::set<mlir::Operation*>& node_visited, mlir::Operation* ouc) {
-    node_visited.insert(op);
-    for (auto &u : op->getResults().getUses()) {
+bool Group::recursivelyDetermineIfCyclic(mlir::Operation* current_op, std::set<mlir::Operation*>& node_visited, mlir::Operation* op) {
+    node_visited.insert(current_op);
+    for (auto &u : current_op->getResults().getUses()) {
         Operation *child_op = u.getOwner();
-        if(child_op == ouc) {
+        if(child_op == op) {
             return true;
         }
         auto it = node_visited.find(child_op);
         if(it == node_visited.end()) {
             //not visited yet
-            if(recursivelyDetermineIfCyclic(child_op, node_visited, ouc)) {
+            if(recursivelyDetermineIfCyclic(child_op, node_visited, op)) {
                 return true;
             }
         }

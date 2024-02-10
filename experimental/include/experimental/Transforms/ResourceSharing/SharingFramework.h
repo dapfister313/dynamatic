@@ -72,7 +72,7 @@ namespace dynamatic {
 namespace experimental {
 namespace sharing {
 
-//stores/transfers information needed for resource sharing
+//stores/transfers information needed for resource sharing from buffer placement
 struct ResourceSharingInfo {
     // for each CFDFC, store the throughput in double format to double format to compare
     // std::map<int, double> throughputPerCFDFC{};
@@ -115,7 +115,7 @@ struct Group {
   bool hasCycle;
   
   // determine if an operation is cyclic (if there is a path from the op that reaches back to it)
-  bool recursivelyDetermineIfCyclic(mlir::Operation* op, std::set<mlir::Operation*>& node_visited, mlir::Operation* ouc);
+  bool recursivelyDetermineIfCyclic(mlir::Operation* current_op, std::set<mlir::Operation*>& node_visited, mlir::Operation* op);
   bool determineIfCyclic(mlir::Operation* op);
 
   // add operation to group
@@ -128,7 +128,6 @@ struct Group {
           items = ops;
           hasCycle = cyclic;
         }
-
   Group(mlir::Operation* op, double occupancy)
         : shared_occupancy(occupancy) {
           items.push_back(op);
@@ -186,6 +185,7 @@ struct Set {
        Each operation type (e.g. mul, add, load)
        can be treated separately
 */
+//OperationTypeStruct
 struct OpSelector {
   double op_latency;
   llvm::StringRef identifier;
