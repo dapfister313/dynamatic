@@ -1,5 +1,5 @@
-#ifndef INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_SCC_H
-#define INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_SCC_H
+#ifndef EXPERIMENTAL_INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_SCC_H
+#define EXPERIMENTAL_INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_SCC_H
 
 #include "dynamatic/Dialect/Handshake/HandshakeDialect.h"
 #include "dynamatic/Dialect/Handshake/HandshakeOps.h"
@@ -40,4 +40,4 @@ void Kosarajus_algorithm_OPL(mlir::Operation* startOp, std::set<mlir::Operation*
 } // namespace experimental
 } // namespace dynamatic
 
-#endif // INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_SCC_H
+#endif // EXPERIMENTAL_INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_SCC_H

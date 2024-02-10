@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_FCCM22SHARING_H
-#define INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_FCCM22SHARING_H
+#ifndef EXPERIMENTAL_INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_FCCM22SHARING_H
+#define EXPERIMENTAL_INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_FCCM22SHARING_H
 
 #include "dynamatic/Support/DynamaticPass.h"
 #include "dynamatic/Support/LLVM.h"
@@ -40,32 +40,4 @@ createResourceSharingFCCM22Pass(StringRef algorithm = "fpga20",
 } // namespace experimental
 } // namespace dynamatic
 
-//stores/transfers information needed for resource sharing
-struct ResourceSharingInfo {
-
-// for each CFDFC, store the throughput in double format to
-// double format to compare
-std::map<int, double> sharing_check{};
-
-//store stats of each operation
-struct OpSpecific {
-    mlir::Operation* op;
-    double occupancy;
-    double op_latency;
-    //double throughput;
-
-    void print() {
-    llvm::errs() << "Operation " << op
-                << ", occupancy: " << occupancy
-                << ", latency: " << op_latency
-                << ", block: " << getLogicBB(op)
-                << "\n";
-    }
-};
-std::vector<OpSpecific> sharing_init;
-
-//constructor
-ResourceSharingInfo() = default;
-};
-
-#endif // INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_FCCM22SHARING_H
+#endif // EXPERIMENTAL_INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_FCCM22SHARING_H

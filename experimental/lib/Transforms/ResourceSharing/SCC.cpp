@@ -26,7 +26,6 @@ namespace dynamatic {
 namespace experimental {
 namespace sharing {
 
-
 /*
  * Dumps content of vector of lists to the console
  */
