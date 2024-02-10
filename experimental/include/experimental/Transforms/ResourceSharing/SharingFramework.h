@@ -75,9 +75,9 @@ namespace sharing {
 //stores/transfers information needed for resource sharing
 struct ResourceSharingInfo {
     // for each CFDFC, store the throughput in double format to double format to compare
-    //std::map<int, double> sharing_check{};
+    // std::map<int, double> throughputPerCFDFC{};
 
-    //store stats of each operation
+    // stores shareable operations and their occupancy
     struct OperationData {
         mlir::Operation* op;
         double occupancy;
@@ -86,12 +86,19 @@ struct ResourceSharingInfo {
     };
     std::vector<OperationData> operations;
     
-    //used to perform SCC-computation (finding strongly connected components)
+    // used to perform SCC-computation (finding strongly connected components)
     SmallVector<dynamatic::experimental::ArchBB> archs;
-   
+    
+    // first operation in the IR
     Operation *startingOp;
+
+    // stores control merge and branch of each BB
     std::map<int, controlStructure> control_map;
+
+    // handshake::FuncOp
     FuncOp funcOp;
+
+    // list of values where to insert a seq buffer
     std::vector<Value> opaqueChannel = {};
 
     //constructor
