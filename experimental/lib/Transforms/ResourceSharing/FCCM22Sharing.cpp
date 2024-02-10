@@ -86,7 +86,7 @@ using namespace dynamatic::experimental::sharing;
 namespace {
 
 struct ResourceSharingFCCM22PerformancePass : public HandshakePlaceBuffersPass {
-  ResourceSharingFCCM22PerformancePass(ResourceSharing_Data &data, StringRef algorithm,
+  ResourceSharingFCCM22PerformancePass(ResourceSharingInfo &data, StringRef algorithm,
                         StringRef frequencies, StringRef timingModels,
                         bool firstCFDFC, double targetCP, unsigned timeout,
                         bool dumpLogs)
@@ -94,7 +94,7 @@ struct ResourceSharingFCCM22PerformancePass : public HandshakePlaceBuffersPass {
                                   firstCFDFC, targetCP, timeout, dumpLogs),
         data(data){};
 
-  ResourceSharing_Data &data;
+  ResourceSharingInfo &data;
 
 protected:
   
@@ -131,7 +131,7 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   if (failed(milp->optimize()) || failed(milp->getResult(placement)))
     return failure();
  
-  data.sharing_feedback.sharing_init = milp->getData();
+  data.sharing_init = milp->getData();
 
   controlStructure control_item;
   unsigned int BB_idx = 0;
@@ -221,7 +221,7 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
   OpBuilder builder(&getContext());
   llvm::errs() << "***** Resource Sharing *****\n";
   ModuleOp modOp = getOperation();
-  ResourceSharing_Data data;
+  ResourceSharingInfo data;
 
 
   TimingDatabase timingDB(&getContext());
@@ -243,7 +243,7 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
 
     //NameUniquer names(data.funcOp);
     std::unordered_map<mlir::Operation*, double> data_mod;
-    for(auto item : data.sharing_feedback.sharing_init) {
+    for(auto item : data.sharing_init) {
       if (data_mod.find(item.op) != data_mod.end()) {
         data_mod[item.op] = std::max(item.occupancy, data_mod[item.op]);
       } else {
@@ -273,7 +273,7 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
     //get number of strongly connected components
     int number_of_SCC = SCC.size();
 
-    sharing.retrieveDataFromPerformanceAnalysis(data.sharing_feedback, SCC, number_of_SCC, timingDB);
+    sharing.retrieveDataFromPerformanceAnalysis(data, SCC, number_of_SCC, timingDB);
     sharing.print();
    // iterating over different operation types
    for(auto& op_type : sharing.operation_types) {
@@ -323,7 +323,7 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
                 destroy_performance_model(&builder, current_permutation);
                 //check if no performance loss, if yes, break
                 ResourceSharing temp_sharing;
-                temp_sharing.retrieveDataFromPerformanceAnalysis(data.sharing_feedback, SCC, number_of_SCC, timingDB);
+                temp_sharing.retrieveDataFromPerformanceAnalysis(data, SCC, number_of_SCC, timingDB);
                 if(true) {
                   finalOrd = current_permutation;
                   break;

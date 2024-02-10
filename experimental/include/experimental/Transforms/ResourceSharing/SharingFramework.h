@@ -72,6 +72,7 @@ namespace dynamatic {
 namespace experimental {
 namespace sharing {
 
+/*
 //stores/transfers information needed for resource sharing
 struct ResourceSharingInfo {
     // for each CFDFC, store the throughput in double format to
@@ -103,6 +104,35 @@ struct ResourceSharing_Data {
     std::map<int, controlStructure> control_map;
     FuncOp funcOp;
     std::vector<Value> opaqueChannel = {};
+};
+*/
+
+//stores/transfers information needed for resource sharing
+struct ResourceSharingInfo {
+    // for each CFDFC, store the throughput in double format to
+    // double format to compare
+    std::map<int, double> sharing_check{};
+
+    //store stats of each operation
+    struct OpSpecific {
+        mlir::Operation* op;
+        double occupancy;
+        double op_latency;
+
+        void print();
+    };
+    std::vector<OpSpecific> sharing_init;
+    
+    //used to perform SCC-computation (finding strongly connected components)
+    SmallVector<dynamatic::experimental::ArchBB> archs;
+
+    Operation *startingOp;
+    std::map<int, controlStructure> control_map;
+    FuncOp funcOp;
+    std::vector<Value> opaqueChannel = {};
+    
+    //constructor
+    ResourceSharingInfo() = default;
 };
 
 /*
