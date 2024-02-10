@@ -186,14 +186,10 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   }
 
   llvm::errs() << "Setting some random count!\n";
-  data.someCountOfSomething += 10;
-  llvm::errs() << "Current count: " << data.someCountOfSomething << "\n";
-
-  //data.sharing_feedback = info.sharing_info;
+  
   data.archs = myInfo.archs;
   data.funcOp = myInfo.funcOp;
 
-  data.someCountOfSomething += 20;
   delete milp;
   return success();
 }

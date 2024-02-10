@@ -99,8 +99,6 @@ struct ResourceSharing_Data {
     //used to perform SCC-computation (finding strongly connected components)
     SmallVector<dynamatic::experimental::ArchBB> archs;
 
-    unsigned someCountOfSomething = 0;
-    unsigned totalNumberOfOpaqueBuffers = 0;
     Operation *startingOp;
     std::map<int, controlStructure> control_map;
     FuncOp funcOp;
