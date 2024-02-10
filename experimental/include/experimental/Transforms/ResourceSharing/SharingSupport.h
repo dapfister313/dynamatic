@@ -98,7 +98,7 @@ namespace fpga20 {
 
 class MyFPGA20Buffers : public FPGA20Buffers {
     public:
-    std::vector<ResourceSharingInfo::OpSpecific> getData();
+    std::vector<ResourceSharingInfo::OperationData> getData();
     LogicalResult addSyncConstraints(std::vector<Value> opaqueChannel);
 
     //constructor

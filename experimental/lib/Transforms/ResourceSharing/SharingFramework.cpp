@@ -2,7 +2,7 @@
 
 using namespace dynamatic::experimental::sharing;
 
-void ResourceSharingInfo::OpSpecific::print() {
+void ResourceSharingInfo::OperationData::print() {
     llvm::errs() << "Operation " << op
                 << ", occupancy: " << occupancy
                 << ", latency: " << op_latency

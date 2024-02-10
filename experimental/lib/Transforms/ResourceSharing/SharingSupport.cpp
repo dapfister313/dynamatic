@@ -4,9 +4,9 @@ using namespace dynamatic::experimental::sharing;
 
 using namespace dynamatic::buffer::fpga20;
 
-std::vector<ResourceSharingInfo::OpSpecific> MyFPGA20Buffers::getData() {
-    std::vector<ResourceSharingInfo::OpSpecific> return_info;
-    ResourceSharingInfo::OpSpecific sharing_item;
+std::vector<ResourceSharingInfo::OperationData> MyFPGA20Buffers::getData() {
+    std::vector<ResourceSharingInfo::OperationData> return_info;
+    ResourceSharingInfo::OperationData sharing_item;
     double throughput;
     for (auto [idx, cfdfcWithVars] : llvm::enumerate(vars.cfVars)) {
         auto [cf, cfVars] = cfdfcWithVars;
