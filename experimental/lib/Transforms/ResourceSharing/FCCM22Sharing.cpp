@@ -218,16 +218,14 @@ struct ResourceSharingFCCM22Pass
 } // namespace
 
 void ResourceSharingFCCM22Pass::runDynamaticPass() {
-  OpBuilder builder(&getContext());
   llvm::errs() << "***** Resource Sharing *****\n";
+  OpBuilder builder(&getContext());
   ModuleOp modOp = getOperation();
   ResourceSharingInfo data;
-
 
   TimingDatabase timingDB(&getContext());
   if (failed(TimingDatabase::readFromJSON(timingModels, timingDB)))
     return signalPassFailure();
-
 
     // Data object to extract information from buffer placement
     // Use a pass manager to run buffer placement on the current module
@@ -243,26 +241,8 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
     revert_to_initial_state();
 
     ResourceSharing sharing;
-    sharing.setFirstOp(data.startingOp);
-
-    //eigther use this
-    sharing.initializeTopolocialOpSort();
-    //or this
-    std::set<mlir::Operation*> ops_with_no_loops;
-    sharing.performSCC_opl(ops_with_no_loops);
-
-    sharing.getListOfControlFlowEdges(data.archs);
-    int number_of_basic_blocks = sharing.getNumberOfBasicBlocks();
-    llvm::errs() << "Number of BBs: " << number_of_basic_blocks << "\n";
-
-    //perform SCC computation
-    std::vector<int> SCC = sharing.performSCC_bbl();
-
-    //get number of strongly connected components
-    int number_of_SCC = SCC.size();
-
-    sharing.retrieveDataFromPerformanceAnalysis(data, SCC, number_of_SCC, timingDB);
-    sharing.print();
+    sharing.placeAndComputeNecessaryDataFromPerformanceAnalysis(data, timingDB);
+    
    // iterating over different operation types
    for(auto& op_type : sharing.operation_types) {
     // Sharing within a loop nest
@@ -310,8 +290,8 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
                 }
                 destroy_performance_model(&builder, current_permutation);
                 //check if no performance loss, if yes, break
-                ResourceSharing temp_sharing;
-                temp_sharing.retrieveDataFromPerformanceAnalysis(data, SCC, number_of_SCC, timingDB);
+                //ResourceSharing temp_sharing;
+                //temp_sharing.retrieveDataFromPerformanceAnalysis(data, SCC, number_of_SCC, timingDB);
                 if(true) {
                   finalOrd = current_permutation;
                   break;

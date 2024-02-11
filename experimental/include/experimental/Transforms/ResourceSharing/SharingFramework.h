@@ -280,6 +280,9 @@ public:
   // print source-destination BB of connection between BBs, throughput per CFDFC and 
   // the composition in operation-type, set, group
   void print();
+
+  // place and compute all necessary data to perform resource sharing
+  void placeAndComputeNecessaryDataFromPerformanceAnalysis(ResourceSharingInfo data, TimingDatabase timingDB);
 };
 
 } // namespace sharing

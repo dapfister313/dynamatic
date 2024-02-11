@@ -290,3 +290,26 @@ void ResourceSharing::print() {
         }
     }
 }
+
+void ResourceSharing::placeAndComputeNecessaryDataFromPerformanceAnalysis(ResourceSharingInfo data, TimingDatabase timingDB) {
+    setFirstOp(data.startingOp);
+
+    //eigther use this
+    initializeTopolocialOpSort();
+    //or this
+    std::set<mlir::Operation*> ops_with_no_loops;
+    performSCC_opl(ops_with_no_loops);
+
+    getListOfControlFlowEdges(data.archs);
+    int number_of_basic_blocks = getNumberOfBasicBlocks();
+
+    //perform SCC computation
+    std::vector<int> SCC = performSCC_bbl();
+
+    //get number of strongly connected components
+    int number_of_SCC = SCC.size();
+
+    retrieveDataFromPerformanceAnalysis(data, SCC, number_of_SCC, timingDB);
+    print();
+    return;
+}
