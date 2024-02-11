@@ -88,9 +88,6 @@ struct ResourceSharingInfo {
     
     // used to perform SCC-computation (finding strongly connected components)
     SmallVector<dynamatic::experimental::ArchBB> archs;
-    
-    // first operation in the IR
-    Operation *startingOp;
 
     // stores control merge and branch of each BB
     std::map<int, controlStructure> control_map;
@@ -247,6 +244,9 @@ public:
 
   // get first operation of the IR
   Operation *getFirstOp();
+
+  // compute first operation of the IR
+  bool computeFirstOp(FuncOp funcOp);
   
   // calculate the topological ordering of all operations
   // important: operations on a cycle do not have a topological order

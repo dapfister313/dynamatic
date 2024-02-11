@@ -147,8 +147,21 @@ void ResourceSharing::recursiveDFStravel(Operation *op, unsigned int *position, 
     return;
 }
 
-void ResourceSharing::setFirstOp(Operation *op) {
-    firstOp = op;
+bool ResourceSharing::computeFirstOp(FuncOp funcOp) {
+    // If we are in the entry block, we can use the start input of the
+    // function (last argument) as our control value
+    if(!funcOp.getArguments().back().getType().isa<NoneType>()) {
+        return false;
+    }
+    Value func = funcOp.getArguments().back();
+    std::vector<Operation *> startingOps;
+    for (auto &u : func.getUses())
+        startingOps.push_back(u.getOwner());
+    if(startingOps.size() != 1) {
+        return false;
+    }
+    firstOp = startingOps[0];
+    return true;
 }
 
 Operation *ResourceSharing::getFirstOp() {
@@ -292,24 +305,25 @@ void ResourceSharing::print() {
 }
 
 void ResourceSharing::placeAndComputeNecessaryDataFromPerformanceAnalysis(ResourceSharingInfo data, TimingDatabase timingDB) {
-    setFirstOp(data.startingOp);
+    // comput first operation of the IR
+    computeFirstOp(data.funcOp);
 
-    //eigther use this
+    // initialize topological sorting to determine topological order
     initializeTopolocialOpSort();
-    //or this
+    
+    // find non-cyclic operations
     std::set<mlir::Operation*> ops_with_no_loops;
     performSCC_opl(ops_with_no_loops);
-
+    
+    // get the connections between basic blocks
     getListOfControlFlowEdges(data.archs);
-    int number_of_basic_blocks = getNumberOfBasicBlocks();
 
     //perform SCC computation
     std::vector<int> SCC = performSCC_bbl();
 
     //get number of strongly connected components
     int number_of_SCC = SCC.size();
-
+    
+    // fill resource sharing class with all shareable operations
     retrieveDataFromPerformanceAnalysis(data, SCC, number_of_SCC, timingDB);
-    print();
-    return;
 }

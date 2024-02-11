@@ -125,8 +125,12 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   else if (algorithm == "fpga20-legacy")
     milp = new fpga20::MyFPGA20Buffers(env, myInfo, timingDB, targetCP,
                                      true);
-  milp->addSyncConstraints(data.opaqueChannel);
+  
   assert(milp && "unknown placement algorithm");
+
+  if(failed(milp->addSyncConstraints(data.opaqueChannel))) {
+    return failure();
+  }
 
   if (failed(milp->optimize()) || failed(milp->getResult(placement)))
     return failure();
@@ -167,19 +171,6 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
     }
     llvm::errs() << "\n";
   }
-
-  // If we are in the entry block, we can use the start input of the
-  // function (last argument) as our control value
-  assert(myInfo.funcOp.getArguments().back().getType().isa<NoneType>() &&
-          "expected last function argument to be a NoneType");
-  llvm::errs() << "Argument: " << myInfo.funcOp.getArguments().back() << "\n";
-  Value func = myInfo.funcOp.getArguments().back();
-  std::vector<Operation *> startingOps;
-  for (auto &u : func.getUses())
-    startingOps.push_back(u.getOwner());
-  if(startingOps.size() != 1)
-    llvm::errs() << "[Critical Error] Expected 1 starting Operation, got " << startingOps.size() << "\n";
-  data.startingOp = startingOps[0];
 
   for(auto arch_item : myInfo.archs) {
     llvm::errs() << "Source: " << arch_item.srcBB << ", Destination: " << arch_item.dstBB << "\n";
