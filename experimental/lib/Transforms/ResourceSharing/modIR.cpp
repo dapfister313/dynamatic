@@ -3,29 +3,19 @@
 using namespace dynamatic::handshake;
 using namespace dynamatic::experimental::sharing;
 
-std::map<int, controlStructure> modification_control_map;
-
-
 namespace dynamatic {
 namespace experimental {
 namespace sharing {
 
-
-
-void initialize_modification(std::map<int, controlStructure> control_map) {
-  modification_control_map = control_map;
-  return;
-}
-
-void revert_to_initial_state() {
-  for(auto& item : modification_control_map) {
+void revert_to_initial_state(std::map<int, controlStructure>& control_map) {
+  for(auto& item : control_map) {
     item.second.current_position = item.second.control_merge;
   }
 }
 
-Value generate_performance_step(OpBuilder* builder, mlir::Operation *op) {
+Value generate_performance_step(OpBuilder* builder, mlir::Operation *op, std::map<int, controlStructure>& control_map) {
   Value return_value;
-  mlir::Value control_merge = modification_control_map[getLogicBB(op).value()].current_position;
+  mlir::Value control_merge = control_map[getLogicBB(op).value()].current_position;
   builder->setInsertionPointAfterValue(control_merge);
   //child operation of control merge
   mlir::Operation *child_op = control_merge.getUses().begin()->getOwner();
@@ -44,16 +34,16 @@ Value generate_performance_step(OpBuilder* builder, mlir::Operation *op) {
     op->replaceUsesOfWith(value, syncOp->getResult(control_int+1));
     control_int++;
   }
-  modification_control_map[getLogicBB(op).value()].current_position = syncOp->getResult(0);
+  control_map[getLogicBB(op).value()].current_position = syncOp->getResult(0);
   inheritBB(op, syncOp);
   return return_value;
 }
 
-std::vector<Value> generate_performance_model(OpBuilder* builder, std::vector<mlir::Operation*>& items) {
+std::vector<Value> generate_performance_model(OpBuilder* builder, std::vector<mlir::Operation*>& items, std::map<int, controlStructure>& control_map) {
   std::vector<Value> return_values;
-  revert_to_initial_state();
+  revert_to_initial_state(control_map);
   for(auto op : items) {
-    return_values.push_back(generate_performance_step(builder, op));
+    return_values.push_back(generate_performance_step(builder, op,control_map));
   }
   return return_values;
 }

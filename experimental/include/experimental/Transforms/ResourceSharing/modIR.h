@@ -32,15 +32,11 @@ struct controlStructure {
     mlir::Value control_branch;
     mlir::Value current_position;
 };
-//std::optional<unsigned> getLogicBB(Operation *op);
 
-void initialize_modification(std::map<int, controlStructure> control_map);
-void revert_to_initial_state();
-
-std::vector<Value> generate_performance_model(OpBuilder* builder, std::vector<mlir::Operation*>& items);
+std::vector<Value> generate_performance_model(OpBuilder* builder, std::vector<mlir::Operation*>& items, std::map<int, controlStructure>& control_map);
 void destroy_performance_model(OpBuilder* builder, std::vector<mlir::Operation*>& items);
 
-Value generate_performance_step(OpBuilder* builder, mlir::Operation *op);
+Value generate_performance_step(OpBuilder* builder, mlir::Operation *op, std::map<int, controlStructure>& control_map);
 void revert_performance_step(OpBuilder* builder, mlir::Operation *op);
 
 mlir::OpResult add_fork(OpBuilder* builder, mlir::OpResult connectionPoint);

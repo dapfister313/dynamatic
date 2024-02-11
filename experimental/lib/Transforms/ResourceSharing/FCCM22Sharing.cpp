@@ -137,33 +137,6 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
  
   data.operations = milp->getData();
   
-  /*
-  controlStructure control_item;
-  unsigned int BB_idx = 0;
-  
-  for (Operation &op : myInfo.funcOp.getOps()) {
-    if(op.getName().getStringRef() == "handshake.merge" || op.getName().getStringRef() == "handshake.control_merge") {
-      for (const auto &u : op.getResults()) {
-        if(u.getType().isa<NoneType>()) {
-          BB_idx = getLogicBB(&op).value();
-          control_item.control_merge = u;
-        }
-      }
-    }
-    if(op.getName().getStringRef() == "handshake.br" || op.getName().getStringRef() == "handshake.cond_br") {
-      for (const auto &u : op.getOperands()) {
-        if(u.getType().isa<NoneType>()) {
-            if(BB_idx != getLogicBB(&op).value()) {
-              llvm::errs() << "[critical Error] control channel not present\n";
-            }
-            control_item.control_branch = u;
-            data.control_map[BB_idx] = control_item;
-        }
-      }
-    }
-  }
-  */
-  
   data.archs = myInfo.archs;
   data.funcOp = myInfo.funcOp;
 
@@ -216,9 +189,6 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
 
     ResourceSharing sharing;
     sharing.placeAndComputeNecessaryDataFromPerformanceAnalysis(data, timingDB);
-
-    initialize_modification(sharing.control_map);
-    revert_to_initial_state();
     
    // iterating over different operation types
    for(auto& op_type : sharing.operation_types) {
@@ -260,15 +230,13 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
                 llvm::errs() << "\n";
 
                 //run_performance analysis here !!!!!!!!!!!!!!!!!!!
-                generate_performance_model(&builder, current_permutation);
+                generate_performance_model(&builder, current_permutation, sharing.control_map);
                 deleteAllBuffers(data.funcOp);
                 if (failed(pm.run(modOp))) {
                   return signalPassFailure();
                 }
                 destroy_performance_model(&builder, current_permutation);
                 //check if no performance loss, if yes, break
-                //ResourceSharing temp_sharing;
-                //temp_sharing.retrieveDataFromPerformanceAnalysis(data, SCC, number_of_SCC, timingDB);
                 if(true) {
                   finalOrd = current_permutation;
                   break;
@@ -284,31 +252,13 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
         }
       }
     }
-    op_type.print();
+    
     // Sharing across loop nests
     op_type.sharingAcrossLoopNests();
-
-    op_type.printFinalGroup();
 
     // Sharing other units
     op_type.sharingOtherUnits();
 
-    op_type.printFinalGroup();
-
-    //here we want to create the performance model
-    //auto op = op_type.final_grouping.groups.begin()->items[0];
-    std::vector<Value> return_values = {};
-    for (auto op :
-      llvm::make_early_inc_range(data.funcOp.getOps<arith::MulIOp>())) {
-        return_values.push_back(generate_performance_step(&builder, op));
-      }
-
-    data.opaqueChannel = return_values;
-    deleteAllBuffers(data.funcOp);
-    if (failed(pm.run(modOp))) {
-      return signalPassFailure();
-    }
-    //dynamatic::sharing::revert_performance_step(&builder, op);
     break;
    }
 }

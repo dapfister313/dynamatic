@@ -89,9 +89,6 @@ struct ResourceSharingInfo {
     // used to perform SCC-computation (finding strongly connected components)
     SmallVector<dynamatic::experimental::ArchBB> archs;
 
-    // stores control merge and branch of each BB
-    //std::map<int, controlStructure> control_map;
-
     // handshake::FuncOp
     FuncOp funcOp;
 
@@ -239,7 +236,7 @@ class ResourceSharing {
 public:
   // stores control merge and branch of each BB
   std::map<int, controlStructure> control_map;
-  
+
   std::vector<OpSelector> operation_types;
   
   // set first operation of the IR
