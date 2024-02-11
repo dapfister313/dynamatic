@@ -9,6 +9,10 @@ void ResourceSharingInfo::OperationData::print() {
                 << "\n";
 }
 
+void ResourceSharingInfo::computeOccupancySum() {
+    return;
+}
+
 void Group::addOperation(mlir::Operation* op) {
     items.push_back(op);
 }

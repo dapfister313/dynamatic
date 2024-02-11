@@ -75,7 +75,7 @@ namespace sharing {
 //stores/transfers information needed for resource sharing from buffer placement
 struct ResourceSharingInfo {
     // for each CFDFC, store the throughput in double format to double format to compare
-    // std::map<int, double> throughputPerCFDFC{};
+    std::map<int, double> throughputPerCFDFC{};
 
     // stores shareable operations and their occupancy
     struct OperationData {
@@ -94,6 +94,15 @@ struct ResourceSharingInfo {
 
     // list of values where to insert a seq buffer
     std::vector<Value> opaqueChannel = {};
+    
+    // determines if one should give the full report back or just the current occupancy sum
+    bool fullReportRequired = true;
+    
+    // specific cluster of operations
+    std::vector<Operation*> testedGroups;
+    // occupancy sum of specific cluster of operations (see above)
+    double occupancySum;
+    void computeOccupancySum();
 
     //constructor
     ResourceSharingInfo() = default;

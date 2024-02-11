@@ -134,11 +134,15 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
 
   if (failed(milp->optimize()) || failed(milp->getResult(placement)))
     return failure();
- 
-  data.operations = milp->getData();
   
-  data.archs = myInfo.archs;
-  data.funcOp = myInfo.funcOp;
+  data.operations = milp->getData();
+
+  if(data.fullReportRequired) {
+    data.archs = myInfo.archs;
+    data.funcOp = myInfo.funcOp;
+  } else { 
+    data.computeOccupancySum();
+  }
 
   delete milp;
   return success();
@@ -185,6 +189,8 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
   if (failed(pm.run(modOp))) {
       return signalPassFailure();
   }
+  // from now on we are only interested in the occupancy sum
+  data.fullReportRequired = false;
   
   // placing data retrieved from buffer placement
   ResourceSharing sharing(data, timingDB);
@@ -201,6 +207,7 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
         for(auto pair : combinations(&set)) {
           //check if sharing is potentially possible
           double occupancy_sum = pair.first->shared_occupancy + pair.second->shared_occupancy;
+          pair.first->hasCycle = true; //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
           //change to separate function!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
           if(occupancy_sum <= op_type.op_latency) {
             std::vector<Operation*> finalOrd;
@@ -218,6 +225,7 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
               std::vector<Operation*> current_permutation;
               current_permutation.insert(current_permutation.end(), pair.first->items.begin(), pair.first->items.end());
               current_permutation.insert(current_permutation.end(), pair.second->items.begin(), pair.second->items.end());
+              std::copy(current_permutation.begin(), current_permutation.end(), std::inserter(data.testedGroups, data.testedGroups.end()));
               std::sort(current_permutation.begin(), current_permutation.end());
               //seperate function for permutations!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
               do {
@@ -231,6 +239,7 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
                 //run_performance analysis here !!!!!!!!!!!!!!!!!!!
                 generate_performance_model(&builder, current_permutation, sharing.control_map);
                 deleteAllBuffers(data.funcOp);
+                data.testedGroups = current_permutation;
                 if (failed(pm.run(modOp))) {
                   return signalPassFailure();
                 }
