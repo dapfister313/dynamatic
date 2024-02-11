@@ -136,11 +136,11 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
     return failure();
  
   data.operations = milp->getData();
-
+  
+  /*
   controlStructure control_item;
   unsigned int BB_idx = 0;
-  // Walkin' in the IR:
-  llvm::errs() << "Walkin' inside the IR:\n";
+  
   for (Operation &op : myInfo.funcOp.getOps()) {
     if(op.getName().getStringRef() == "handshake.merge" || op.getName().getStringRef() == "handshake.control_merge") {
       for (const auto &u : op.getResults()) {
@@ -161,22 +161,8 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
         }
       }
     }
-    llvm::errs() << "Operation" << op << "\n";
-    std::vector<Operation *> opsToProcess;
-    for (auto &u : op.getResults().getUses())
-      opsToProcess.push_back(u.getOwner());
-    llvm::errs() << "Successors: ";
-    for(auto op1 : opsToProcess) {
-      llvm::errs() << op1 << ", ";
-    }
-    llvm::errs() << "\n";
   }
-
-  for(auto arch_item : myInfo.archs) {
-    llvm::errs() << "Source: " << arch_item.srcBB << ", Destination: " << arch_item.dstBB << "\n";
-  }
-
-  llvm::errs() << "Setting some random count!\n";
+  */
   
   data.archs = myInfo.archs;
   data.funcOp = myInfo.funcOp;
@@ -228,11 +214,11 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
         return signalPassFailure();
     }
 
-    initialize_modification(data.control_map);
-    revert_to_initial_state();
-
     ResourceSharing sharing;
     sharing.placeAndComputeNecessaryDataFromPerformanceAnalysis(data, timingDB);
+
+    initialize_modification(sharing.control_map);
+    revert_to_initial_state();
     
    // iterating over different operation types
    for(auto& op_type : sharing.operation_types) {

@@ -90,7 +90,7 @@ struct ResourceSharingInfo {
     SmallVector<dynamatic::experimental::ArchBB> archs;
 
     // stores control merge and branch of each BB
-    std::map<int, controlStructure> control_map;
+    //std::map<int, controlStructure> control_map;
 
     // handshake::FuncOp
     FuncOp funcOp;
@@ -217,17 +217,17 @@ struct OpSelector {
        operation types
 */
 class ResourceSharing {
-  //troughput per basic block
+  // troughput per CFDFC
   std::map<int, double> throughput;
-  //connections between basic blocks
+  // connections between basic blocks
   SmallVector<dynamatic::experimental::ArchBB> archs;
-  //maps operation types to integers (SCC analysis)
+  // maps operation types to integers (SCC analysis)
   std::map<llvm::StringRef, int> OpNames;
-  //number of sharable operation types
+  // number of sharable operation types
   int number_of_operation_types;
-  //operation directly after start
+  // operation directly after start
   Operation *firstOp = nullptr;
-  //Operations in topological order
+  // Operations in topological order
   std::map<Operation *, unsigned int> OpTopologicalOrder;
   
   // run performance ananlysis here !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -237,6 +237,9 @@ class ResourceSharing {
   void recursiveDFStravel(Operation *op, unsigned int *position, std::set<mlir::Operation*>& node_visited);
 
 public:
+  // stores control merge and branch of each BB
+  std::map<int, controlStructure> control_map;
+  
   std::vector<OpSelector> operation_types;
   
   // set first operation of the IR
@@ -280,6 +283,9 @@ public:
   // print source-destination BB of connection between BBs, throughput per CFDFC and 
   // the composition in operation-type, set, group
   void print();
+  
+  // find control structure of each BB: control_merge, control_branch
+  void getControlStructure(FuncOp funcOp);
 
   // place and compute all necessary data to perform resource sharing
   void placeAndComputeNecessaryDataFromPerformanceAnalysis(ResourceSharingInfo data, TimingDatabase timingDB);

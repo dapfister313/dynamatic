@@ -304,6 +304,33 @@ void ResourceSharing::print() {
     }
 }
 
+void ResourceSharing::getControlStructure(FuncOp funcOp) {
+    controlStructure control_item;
+    unsigned int BB_idx = 0;
+    for (Operation &op : funcOp.getOps()) {
+        if(op.getName().getStringRef() == "handshake.merge" || op.getName().getStringRef() == "handshake.control_merge") {
+            for (const auto &u : op.getResults()) {
+                if(u.getType().isa<NoneType>()) {
+                    BB_idx = getLogicBB(&op).value();
+                    control_item.control_merge = u;
+                }
+            }
+        }
+        if(op.getName().getStringRef() == "handshake.br" || op.getName().getStringRef() == "handshake.cond_br") {
+            for (const auto &u : op.getOperands()) {
+                if(u.getType().isa<NoneType>()) {
+                    if(BB_idx != getLogicBB(&op).value()) {
+                        llvm::errs() << "[critical Error] control channel not present\n";
+                    }
+                    control_item.control_branch = u;
+                    control_map[BB_idx] = control_item;
+                }
+            }
+        }
+    }
+    return;
+}
+
 void ResourceSharing::placeAndComputeNecessaryDataFromPerformanceAnalysis(ResourceSharingInfo data, TimingDatabase timingDB) {
     // comput first operation of the IR
     computeFirstOp(data.funcOp);
@@ -318,12 +345,15 @@ void ResourceSharing::placeAndComputeNecessaryDataFromPerformanceAnalysis(Resour
     // get the connections between basic blocks
     getListOfControlFlowEdges(data.archs);
 
-    //perform SCC computation
+    // perform SCC computation
     std::vector<int> SCC = performSCC_bbl();
 
-    //get number of strongly connected components
+    // get number of strongly connected components
     int number_of_SCC = SCC.size();
     
     // fill resource sharing class with all shareable operations
     retrieveDataFromPerformanceAnalysis(data, SCC, number_of_SCC, timingDB);
+    
+    // get control structures of each BB
+    getControlStructure(data.funcOp);
 }

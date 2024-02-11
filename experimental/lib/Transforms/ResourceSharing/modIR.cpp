@@ -22,13 +22,7 @@ void revert_to_initial_state() {
     item.second.current_position = item.second.control_merge;
   }
 }
-/*
-std::optional<unsigned> getLogicBB(Operation *op) {
-  if (auto bb = op->getAttrOfType<mlir::IntegerAttr>(BB_ATTR))
-    return bb.getUInt();
-  return {};
-}
-*/
+
 Value generate_performance_step(OpBuilder* builder, mlir::Operation *op) {
   Value return_value;
   mlir::Value control_merge = modification_control_map[getLogicBB(op).value()].current_position;
