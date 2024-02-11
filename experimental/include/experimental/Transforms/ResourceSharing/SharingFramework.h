@@ -99,7 +99,7 @@ struct ResourceSharingInfo {
     bool fullReportRequired = true;
     
     // specific cluster of operations
-    std::vector<Operation*> testedGroups;
+    std::set<Operation*> testedGroups;
     // occupancy sum of specific cluster of operations (see above)
     double occupancySum;
     void computeOccupancySum();

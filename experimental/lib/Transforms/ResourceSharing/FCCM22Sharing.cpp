@@ -134,14 +134,13 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
 
   if (failed(milp->optimize()) || failed(milp->getResult(placement)))
     return failure();
-  
-  data.operations = milp->getData();
 
   if(data.fullReportRequired) {
+    data.operations = milp->getData();
     data.archs = myInfo.archs;
     data.funcOp = myInfo.funcOp;
   } else { 
-    data.computeOccupancySum();
+    data.occupancySum = milp->getOccupancySum(data.testedGroups);
   }
 
   delete milp;
@@ -207,7 +206,6 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
         for(auto pair : combinations(&set)) {
           //check if sharing is potentially possible
           double occupancy_sum = pair.first->shared_occupancy + pair.second->shared_occupancy;
-          pair.first->hasCycle = true; //!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
           //change to separate function!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
           if(occupancy_sum <= op_type.op_latency) {
             std::vector<Operation*> finalOrd;
@@ -239,13 +237,12 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
                 //run_performance analysis here !!!!!!!!!!!!!!!!!!!
                 generate_performance_model(&builder, current_permutation, sharing.control_map);
                 deleteAllBuffers(data.funcOp);
-                data.testedGroups = current_permutation;
                 if (failed(pm.run(modOp))) {
                   return signalPassFailure();
                 }
                 destroy_performance_model(&builder, current_permutation);
                 //check if no performance loss, if yes, break
-                if(true) {
+                if(occupancy_sum == data.occupancySum) {
                   finalOrd = current_permutation;
                   break;
                 }

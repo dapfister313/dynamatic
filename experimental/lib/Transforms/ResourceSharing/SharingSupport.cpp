@@ -26,6 +26,33 @@ std::vector<ResourceSharingInfo::OperationData> MyFPGA20Buffers::getData() {
     return return_info;
 }
 
+double MyFPGA20Buffers::getOccupancySum(std::set<Operation*>& group) {
+    std::map<Operation*, double> occupancies;
+    for(auto item : group) {
+        occupancies[item] = 0.0;
+    }
+    double throughput, latency, occupancy;
+    for (auto [idx, cfdfcWithVars] : llvm::enumerate(vars.cfVars)) {
+        auto [cf, cfVars] = cfdfcWithVars;
+        // for each CFDFC, extract the throughput in double format
+        throughput = cfVars.throughput.get(GRB_DoubleAttr_X);
+
+        for (auto &[op, unitVars] : cfVars.unitVars) {
+            if(group.find(op) != group.end()) {
+                if (failed(timingDB.getLatency(op, SignalType::DATA, latency)) || latency == 0.0)
+                    continue;
+                occupancy = latency * throughput;
+                occupancies[op] = std::max(occupancy, occupancies[op]);
+            }
+        }
+    }
+    double sum = 0.0;
+    for(auto item : occupancies) {
+        sum += item.second;
+    }
+    return sum;
+}
+
 LogicalResult MyFPGA20Buffers::addSyncConstraints(std::vector<Value> opaqueChannel) {
     for(auto channel : opaqueChannel) {
         ChannelVars &chVars = vars.channelVars[channel];
