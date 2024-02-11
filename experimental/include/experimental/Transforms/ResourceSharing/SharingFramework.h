@@ -286,6 +286,11 @@ public:
 
   // place and compute all necessary data to perform resource sharing
   void placeAndComputeNecessaryDataFromPerformanceAnalysis(ResourceSharingInfo data, TimingDatabase timingDB);
+
+  // constructor
+  ResourceSharing(ResourceSharingInfo data, TimingDatabase timingDB) {
+     placeAndComputeNecessaryDataFromPerformanceAnalysis(data, timingDB);
+  }
 };
 
 } // namespace sharing

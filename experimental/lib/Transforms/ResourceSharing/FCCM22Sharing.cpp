@@ -118,7 +118,7 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
 
   // Create and solve the MILP
   fpga20::MyFPGA20Buffers *milp = nullptr;
-  //GRBEnv &env, FuncInfo &funcInfo, const TimingDatabase &timingDB, double targetPeriod, bool legacyPlacement)
+  
   if (algorithm == "fpga20")
     milp = new fpga20::MyFPGA20Buffers(env, myInfo, timingDB, targetCP,
                                      false);
@@ -172,26 +172,25 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
   OpBuilder builder(&getContext());
   ModuleOp modOp = getOperation();
   ResourceSharingInfo data;
-
+  
   TimingDatabase timingDB(&getContext());
   if (failed(TimingDatabase::readFromJSON(timingModels, timingDB)))
     return signalPassFailure();
 
-    // Data object to extract information from buffer placement
-    // Use a pass manager to run buffer placement on the current module
-    PassManager pm(&getContext());
-    pm.addPass(std::make_unique<ResourceSharingFCCM22PerformancePass>(
-        data, algorithm, frequencies, timingModels, firstCFDFC, targetCP,
-        timeout, dumpLogs));
-    if (failed(pm.run(modOp))) {
-        return signalPassFailure();
-    }
-
-    ResourceSharing sharing;
-    sharing.placeAndComputeNecessaryDataFromPerformanceAnalysis(data, timingDB);
-    
-   // iterating over different operation types
-   for(auto& op_type : sharing.operation_types) {
+  // running buffer placement on current module
+  PassManager pm(&getContext());
+  pm.addPass(std::make_unique<ResourceSharingFCCM22PerformancePass>(
+      data, algorithm, frequencies, timingModels, firstCFDFC, targetCP,
+      timeout, dumpLogs));
+  if (failed(pm.run(modOp))) {
+      return signalPassFailure();
+  }
+  
+  // placing data retrieved from buffer placement
+  ResourceSharing sharing(data, timingDB);
+  
+  // iterating over different operation types
+  for(auto& op_type : sharing.operation_types) {
     // Sharing within a loop nest
     for(auto& set : op_type.sets) {
       bool groups_modified = true;
@@ -260,7 +259,7 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
     op_type.sharingOtherUnits();
 
     break;
-   }
+  }
 }
 
 namespace dynamatic {
