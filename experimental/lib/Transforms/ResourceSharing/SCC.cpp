@@ -219,8 +219,7 @@ std::vector<int> Kosarajus_algorithm_BBL(SmallVector<ArchBB> archs) {
     std::vector<std::list<int>> transpose_graph = converse_graph(adjacency_list, Nodes);
     std::vector<std::list<int>> SCC = secondDFStravel(transpose_graph, DFSstack, Nodes);
     int position = 0;
-    //for(unsigned long i = 0; i < SCC.size(); i++) {
-        for(auto component : SCC) {
+    for(auto component : SCC) {
         bool is_loop_nest = true;
         if(component.size() == 1) {
             //may be not a CFG loop nest
@@ -245,81 +244,89 @@ std::vector<int> Kosarajus_algorithm_BBL(SmallVector<ArchBB> archs) {
     return result;
 }
 
-void recursive_list_creator_opl(mlir::Operation* currOp, std::vector<std::list<int>>& adjacency_list, std::map<mlir::Operation*, int>& conversions, int* map_size, std::set<mlir::Operation*>& node_visited, std::map<Operation *, unsigned int>& topological_sort, int *sorting_idx, std::stack<int>& DFSstack) {
+void recursive_list_creator_opl(mlir::Operation* currOp, std::map<Operation*,std::list<Operation*>>& adjacency_list, std::set<mlir::Operation*>& node_visited, std::stack<Operation*>& DFSstack) {
     node_visited.insert(currOp);
-    int op_idx = conversions.find(currOp)->second;
     for (auto &u : currOp->getResults().getUses()) {
         //get child operation
         Operation *child_op = u.getOwner();
 
-        //update adjacency list
-        int child_idx = -1;
-        auto cit = conversions.find(child_op);
-        if(cit == conversions.end()) {
-            //operation not yet present
-            conversions[child_op] = *map_size;
-            child_idx = *map_size;
-            ++*map_size;
-            adjacency_list.push_back(std::list<int>());
-        } else {
-            child_idx = cit->second;
-        }
-        adjacency_list[op_idx].push_back(child_idx);
+        adjacency_list[child_op].push_back(currOp);
 
         //traverse child operation if not yet done
         auto it = node_visited.find(child_op);
         if(it == node_visited.end()) {
            //not visited yet
-           recursive_list_creator_opl(child_op, adjacency_list, conversions, map_size, node_visited, topological_sort, sorting_idx, DFSstack);
+           recursive_list_creator_opl(child_op, adjacency_list, node_visited, DFSstack);
         }
     }
-    topological_sort[currOp] = *sorting_idx;
-    DFSstack.push(op_idx);
-    *sorting_idx++;
+    DFSstack.push(currOp);
     return;
 }
 
-void create_adjacency_list_opl(mlir::Operation* startOp, std::vector<std::list<int>>& adjacency_list, std::map<mlir::Operation*, int>& conversions, std::map<Operation *, unsigned int>& topological_sort, std::stack<int>& DFSstack) {
+void create_adjacency_list_opl(mlir::Operation* startOp, std::map<Operation*,std::list<Operation*>>& adjacency_list, std::stack<Operation*>& DFSstack) {
     std::set<mlir::Operation*> node_visited;
-    int position = 0;
-    int sorting_idx = 0;
-    recursive_list_creator_opl(startOp, adjacency_list, conversions, &position, node_visited, topological_sort, &sorting_idx, DFSstack);
+    recursive_list_creator_opl(startOp, adjacency_list, node_visited, DFSstack);
     return;
 }
 
-void get_noncyclic_operations(std::vector<std::list<int>>& adjacency_list, std::vector<std::list<int>>& SCC, std::map<mlir::Operation*, int>& conversions, std::set<mlir::Operation*>& result) {
-    //check which indexes are noncyclic
-    std::set<int> intermediate;
+void secondRecursiveDFStravel(std::map<Operation*,std::list<Operation*>>& adjacency_list, std::set<mlir::Operation*>& node_visited, Operation* current_node, std::list<Operation*>& currSCC) {
+    std::list<Operation*> current_list = adjacency_list[current_node];
+    for(auto item : current_list) {
+        auto it = node_visited.find(item);
+        if(it == node_visited.end()) {
+            node_visited.insert(item);
+            secondRecursiveDFStravel(adjacency_list, node_visited, item, currSCC);
+        }
+    }
+    currSCC.push_front(current_node);
+    return;
+}
+
+std::vector<std::list<Operation*>> secondDFStravel(std::map<Operation*,std::list<Operation*>> &adjacency_list, std::stack<Operation*>& DFSstack) {
+    std::vector<std::list<Operation*>> result;
+    std::set<mlir::Operation*> node_visited;
+    while(!DFSstack.empty()) {
+        auto current_node = DFSstack.top();
+        DFSstack.pop();
+        auto it = node_visited.find(current_node);
+        if(it != node_visited.end()) {
+            continue;
+        }
+        node_visited.insert(current_node);
+        std::list<Operation*> currSCC;
+        secondRecursiveDFStravel(adjacency_list, node_visited, current_node, currSCC);
+        result.push_back(currSCC);
+    }
+    return result;
+}
+
+void get_noncyclic_operations(std::map<Operation*,std::list<Operation*>>& adjacency_list, std::vector<std::list<Operation*>>& SCC, std::set<mlir::Operation*>& result) {
     for(auto list : SCC) {
         if(list.size() == 1) {
             //may be noncyclic
-            int value = *list.begin();
-            for(auto item : adjacency_list[value]) {
-                if(item == value) {
-                    continue;
+            bool is_not_on_loop = true;
+            auto op = *list.begin();
+            for(auto &u : op->getResults().getUses()) {
+                //get child operation
+                if(u.getOwner() == op) {
+                    is_not_on_loop = false;
+                    break;
                 }
             }
-            intermediate.insert(value);
-        }
-    }
-    //convert indexes to actual operations
-    for(auto it : conversions) {
-        if(intermediate.find(it.second) != intermediate.end()) {
-            result.insert(it.first);
+            if(is_not_on_loop) {
+                result.insert(op);
+            }
         }
     }
     return;
 }
 
 void Kosarajus_algorithm_OPL(mlir::Operation* startOp, std::set<mlir::Operation*>& result, std::map<Operation *, unsigned int>& topological_sort) {
-    std::vector<std::list<int>> adjacency_list;
-    std::map<mlir::Operation*, int> conversions;
-    std::stack<int> DFSstack;
-    create_adjacency_list_opl(startOp, adjacency_list, conversions, topological_sort, DFSstack);
-    int Nodes = adjacency_list.size();
-    std::vector<std::list<int>> transpose_graph = converse_graph(adjacency_list, Nodes);
-    std::vector<std::list<int>> SCC = secondDFStravel(transpose_graph, DFSstack, Nodes);
-    get_noncyclic_operations(adjacency_list, SCC, conversions, result);
+    std::map<Operation*,std::list<Operation*>> adjacency_list;
+    std::stack<Operation *> DFSstack;
+    create_adjacency_list_opl(startOp, adjacency_list, DFSstack);
+    std::vector<std::list<Operation*>> SCC = secondDFStravel(adjacency_list, DFSstack);
+    get_noncyclic_operations(adjacency_list, SCC, result);
     return;
 }
 
