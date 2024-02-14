@@ -136,10 +136,11 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   if (failed(milp->optimize()) || failed(milp->getResult(placement)))
     return failure();
   
+  data.funcOp = myInfo.funcOp;
+
   if(data.fullReportRequired) {
     data.operations = milp->getData();
     data.archs = myInfo.archs;
-    data.funcOp = myInfo.funcOp;
   } else { 
     data.occupancySum = milp->getOccupancySum(data.testedGroups);
   }
@@ -169,6 +170,40 @@ struct ResourceSharingFCCM22Pass
 
   void runDynamaticPass() override;
 };
+
+bool runPerformanceAnalysisOfOnePermutation(ResourceSharingInfo &data, std::vector<Operation*>& current_permutation,
+                                            ResourceSharing& sharing, OpBuilder* builder, PassManager& pm, ModuleOp& modOp) {
+    deleteAllBuffers(data.funcOp);
+    data.opaqueChannel = generate_performance_model(builder, current_permutation, sharing.control_map);
+    if (failed(pm.run(modOp))) {
+        return false;
+    }
+    destroy_performance_model(builder, current_permutation);
+    return true;
+}
+
+bool runPerformanceAnalysis(GroupIt group1, GroupIt group2, double occupancy_sum, ResourceSharingInfo &data, OpBuilder* builder, 
+                            PassManager& pm, ModuleOp& modOp, std::vector<Operation*>& finalOrd, ResourceSharing& sharing) {
+    // Search for best group ordering
+    std::vector<Operation*> current_permutation;
+    current_permutation.insert(current_permutation.end(), group1->items.begin(), group1->items.end());
+    current_permutation.insert(current_permutation.end(), group2->items.begin(), group2->items.end());
+    data.testedGroups.clear();
+    std::copy(current_permutation.begin(), current_permutation.end(), std::inserter(data.testedGroups, data.testedGroups.end()));
+    std::sort(current_permutation.begin(), current_permutation.end());
+
+    do {
+        if(runPerformanceAnalysisOfOnePermutation(data, current_permutation,sharing, builder, pm, modOp) == false) {
+          return false;
+        }
+        if(equal(occupancy_sum, data.occupancySum)) {
+            finalOrd = current_permutation;
+            break;
+        }
+    } while (next_permutation (current_permutation.begin(), current_permutation.end()));
+    return true;
+}
+
 } // namespace
 
 void ResourceSharingFCCM22Pass::runDynamaticPass() {
@@ -203,9 +238,6 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
   
   // iterating over different operation types
   for(auto& op_type : sharing.operation_types) {
-    if(op_type.identifier != "arith.muli") {
-      continue;
-    }
     // Sharing within a loop nest
     for(auto& set : op_type.sets) {
       bool groups_modified = true;
@@ -224,27 +256,8 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
             if(!pair.first->hasCycle && !pair.second->hasCycle) {
               finalOrd = sharing.sortTopologically(pair.first, pair.second);
             } else {
-              // Search for best group ordering
-              std::vector<Operation*> current_permutation;
-              current_permutation.insert(current_permutation.end(), pair.first->items.begin(), pair.first->items.end());
-              current_permutation.insert(current_permutation.end(), pair.second->items.begin(), pair.second->items.end());
-              data.testedGroups.clear();
-              std::copy(current_permutation.begin(), current_permutation.end(), std::inserter(data.testedGroups, data.testedGroups.end()));
-              std::sort(current_permutation.begin(), current_permutation.end());
-              //seperate function for permutations!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-              do {
-                //run_performance analysis here !!!!!!!!!!!!!!!!!!!
-                deleteAllBuffers(data.funcOp);
-                data.opaqueChannel = generate_performance_model(&builder, current_permutation, sharing.control_map);
-                if (failed(pm.run(modOp))) {
-                  return signalPassFailure();
-                }
-                destroy_performance_model(&builder, current_permutation);
-                if(equal(occupancy_sum, data.occupancySum)) {
-                  finalOrd = current_permutation;
-                  break;
-                }
-              } while (next_permutation (current_permutation.begin(), current_permutation.end()));
+              runPerformanceAnalysis(pair.first, pair.second, occupancy_sum, data, &builder, 
+                                     pm, modOp, finalOrd, sharing);
             }
             if(finalOrd.size() != 0) {
                 //Merge groups, update ordering and update shared occupancy

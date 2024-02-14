@@ -73,11 +73,11 @@ void Set::print(NameUniquer names) {
     }
 }
 
-void OpSelector::addSet(Group group) {
+void ResourceSharingForSingleType::addSet(Group group) {
     sets.push_back(Set(group));
 }
 
-void OpSelector::print() {
+void ResourceSharingForSingleType::print() {
     llvm::errs() << identifier << "\n";
     for(auto set : sets) {
         llvm::errs() << "SCC"  << set.SCC_id << ":\n";
@@ -92,7 +92,7 @@ void OpSelector::print() {
     }
 }
 
-void OpSelector::printFinalGroup() {
+void ResourceSharingForSingleType::printFinalGroup() {
     llvm::errs() << "Final grouping for " <<identifier << ":\n";
     int group_count = 0;
     for(auto group : final_grouping.groups) {
@@ -104,7 +104,7 @@ void OpSelector::printFinalGroup() {
     llvm::errs() << "\n";
 }
 
-void OpSelector::sharingAcrossLoopNests() {
+void ResourceSharingForSingleType::sharingAcrossLoopNests() {
     int number_of_sets = sets.size();
     if(!number_of_sets) {
         return;
@@ -129,7 +129,7 @@ void OpSelector::sharingAcrossLoopNests() {
     }
 }
 
-void OpSelector::sharingOtherUnits() {
+void ResourceSharingForSingleType::sharingOtherUnits() {
     auto it = final_grouping.groups.begin();
     for(auto unit : Ops_not_on_CFG) {
         it->addOperation(unit);
@@ -138,10 +138,6 @@ void OpSelector::sharingOtherUnits() {
             it = final_grouping.groups.begin();
         }
     }
-}
-
-double ResourceSharing::runPerformanceAnalysis() {
-    return 0;
 }
 
 void ResourceSharing::recursiveDFStravel(Operation *op, unsigned int *position, std::set<mlir::Operation*>& node_visited) {
@@ -159,7 +155,7 @@ void ResourceSharing::recursiveDFStravel(Operation *op, unsigned int *position, 
     }
     //update container
     OpTopologicalOrder[op] = *position;
-    *position++;
+    ++(*position);
     return;
 }
 
@@ -250,9 +246,9 @@ void ResourceSharing::retrieveDataFromPerformanceAnalysis(ResourceSharingInfo sh
             OpNames[OpName] = number_of_operation_types;
             OpIdx = number_of_operation_types;
             ++number_of_operation_types;
-            operation_types.push_back(OpSelector(latency, OpName));
+            operation_types.push_back(ResourceSharingForSingleType(latency, OpName));
         }
-        OpSelector& OpT = operation_types[OpIdx];
+        ResourceSharingForSingleType& OpT = operation_types[OpIdx];
 
         //choose the right set
         int SetIdx = -1;

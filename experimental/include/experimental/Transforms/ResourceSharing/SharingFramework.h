@@ -1,6 +1,12 @@
 #ifndef EXPERIMENTAL_INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_SHARINGFRAMEWORK_H
 #define EXPERIMENTAL_INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_SHARINGFRAMEWORK_H
 
+//===- FCCM22Sharing.h - resource-sharing -----*- C++ -*-===//
+//
+// Implements the --resource-sharing pass, which checks for sharable
+// Operations (sharable means little to no performance overhead).
+//===----------------------------------------------------------------------===//
+
 #include "experimental/Transforms/ResourceSharing/NameUniquer.h"
 #include "experimental/Transforms/ResourceSharing/FCCM22Sharing.h"
 #include "experimental/Transforms/ResourceSharing/SCC.h"
@@ -192,9 +198,7 @@ struct Set {
        Each operation type (e.g. mul, add, load)
        can be treated separately
 */
-//OperationTypeStruct
-//ResourceSharingForSingleType
-struct OpSelector {
+struct ResourceSharingForSingleType {
   double op_latency;
   llvm::StringRef identifier;
   std::vector<Set> sets{};
@@ -218,7 +222,7 @@ struct OpSelector {
   void sharingOtherUnits();
 
   //Constructor
-  OpSelector(double latency, llvm::StringRef identifier)
+  ResourceSharingForSingleType(double latency, llvm::StringRef identifier)
         : op_latency(latency), identifier(identifier), final_grouping(Set(latency)) {}
 
 };
@@ -240,18 +244,16 @@ class ResourceSharing {
   Operation *firstOp = nullptr;
   // Operations in topological order
   std::map<Operation *, unsigned int> OpTopologicalOrder;
-  
-  // run performance ananlysis here !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-  double runPerformanceAnalysis();
 
   // used to run topological sorting
   void recursiveDFStravel(Operation *op, unsigned int *position, std::set<mlir::Operation*>& node_visited);
 
 public:
+
   // stores control merge and branch of each BB
   std::map<int, controlStructure> control_map;
 
-  std::vector<OpSelector> operation_types;
+  std::vector<ResourceSharingForSingleType> operation_types;
   
   // set first operation of the IR
   void setFirstOp(Operation *op);
