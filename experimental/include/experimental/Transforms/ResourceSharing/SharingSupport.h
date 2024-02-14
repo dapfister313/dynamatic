@@ -87,6 +87,22 @@ inline std::vector<std::pair<GroupIt, GroupIt>> combinations(Set *set) {
     return result;
 }
 
+inline bool equal(double a, double b) {
+    double diff = 0.000001;
+    if((a + diff > b)  && (b + diff > a)) {
+        return true;
+    }
+    return false;
+}
+
+inline bool lessOrEqual(double a, double b) {
+    double diff = 0.000001;
+    if((a < b + diff)) {
+        return true;
+    }
+    return false;
+}
+
 } // namespace sharing
 } // namespace experimental
 } // namespace dynamatic
@@ -104,8 +120,10 @@ class MyFPGA20Buffers : public FPGA20Buffers {
 
     //constructor
     MyFPGA20Buffers(GRBEnv &env, FuncInfo &funcInfo, const TimingDatabase &timingDB,
-                            double targetPeriod, bool legacyPlacement)
-        : FPGA20Buffers(env, funcInfo, timingDB, targetPeriod, legacyPlacement){};
+                            double targetPeriod, bool legacyPlacement, Logger &logger, StringRef milpName)
+        : FPGA20Buffers(env, funcInfo, timingDB, targetPeriod, legacyPlacement, logger, milpName){
+    
+        };
 };
 
 } // namespace fpga20

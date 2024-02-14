@@ -4,6 +4,7 @@
 // Operations (sharable means little to no performance overhead).
 //===----------------------------------------------------------------------===//
 
+#include "experimental/Transforms/ResourceSharing/NameUniquer.h"
 //#include "dynamatic/Support/NameUniquer.h"
 #include "experimental/Transforms/ResourceSharing/FCCM22Sharing.h"
 #include "experimental/Transforms/ResourceSharing/SCC.h"
@@ -121,10 +122,10 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
   
   if (algorithm == "fpga20")
     milp = new fpga20::MyFPGA20Buffers(env, myInfo, timingDB, targetCP,
-                                     false);
+                                     false, *logger, "1");
   else if (algorithm == "fpga20-legacy")
     milp = new fpga20::MyFPGA20Buffers(env, myInfo, timingDB, targetCP,
-                                     true);
+                                     true, *logger, "1");
   
   assert(milp && "unknown placement algorithm");
 
@@ -134,7 +135,7 @@ LogicalResult ResourceSharingFCCM22PerformancePass::getBufferPlacement(
 
   if (failed(milp->optimize()) || failed(milp->getResult(placement)))
     return failure();
-
+  
   if(data.fullReportRequired) {
     data.operations = milp->getData();
     data.archs = myInfo.archs;
@@ -174,8 +175,10 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
   llvm::errs() << "***** Resource Sharing *****\n";
   OpBuilder builder(&getContext());
   ModuleOp modOp = getOperation();
-  ResourceSharingInfo data;
   
+  ResourceSharingInfo data;
+  data.fullReportRequired = true;
+
   TimingDatabase timingDB(&getContext());
   if (failed(TimingDatabase::readFromJSON(timingModels, timingDB)))
     return signalPassFailure();
@@ -188,61 +191,56 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
   if (failed(pm.run(modOp))) {
       return signalPassFailure();
   }
-  // from now on we are only interested in the occupancy sum
-  data.fullReportRequired = false;
   
   // placing data retrieved from buffer placement
   ResourceSharing sharing(data, timingDB);
+
+  // delete !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  NameUniquer names(data.funcOp);
+
+  // from now on we are only interested in the occupancy sum
+  data.fullReportRequired = false;
   
   // iterating over different operation types
   for(auto& op_type : sharing.operation_types) {
+    if(op_type.identifier != "arith.muli") {
+      continue;
+    }
     // Sharing within a loop nest
     for(auto& set : op_type.sets) {
       bool groups_modified = true;
       while(groups_modified) {
         groups_modified = false;
-
+        std::vector<std::pair<GroupIt, GroupIt>> combination = combinations(&set);
         //iterate over combinations of groups
-        for(auto pair : combinations(&set)) {
+        for(auto pair : combination) {
           //check if sharing is potentially possible
           double occupancy_sum = pair.first->shared_occupancy + pair.second->shared_occupancy;
+          
           //change to separate function!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-          if(occupancy_sum <= op_type.op_latency) {
+          if(lessOrEqual(occupancy_sum, op_type.op_latency)) {
             std::vector<Operation*> finalOrd;
             //check if operations on loop
             if(!pair.first->hasCycle && !pair.second->hasCycle) {
-              llvm::errs() << "[comp] Non-cyclic\n";
               finalOrd = sharing.sortTopologically(pair.first, pair.second);
-              if(!sharing.isTopologicallySorted(finalOrd)) {
-                llvm::errs() << "[info] Failed topological sorting\n";
-              }
-              groups_modified = true;
             } else {
-              llvm::errs() << "[comp] Cyclic\n";
               // Search for best group ordering
               std::vector<Operation*> current_permutation;
               current_permutation.insert(current_permutation.end(), pair.first->items.begin(), pair.first->items.end());
               current_permutation.insert(current_permutation.end(), pair.second->items.begin(), pair.second->items.end());
+              data.testedGroups.clear();
               std::copy(current_permutation.begin(), current_permutation.end(), std::inserter(data.testedGroups, data.testedGroups.end()));
               std::sort(current_permutation.begin(), current_permutation.end());
               //seperate function for permutations!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
               do {
-                //Print out current permutation
-                llvm::errs() << "[Permutation] Start\n";
-                for(auto op : current_permutation) {
-                  llvm::errs() << op << ", ";
-                }
-                llvm::errs() << "\n";
-
                 //run_performance analysis here !!!!!!!!!!!!!!!!!!!
-                generate_performance_model(&builder, current_permutation, sharing.control_map);
                 deleteAllBuffers(data.funcOp);
+                data.opaqueChannel = generate_performance_model(&builder, current_permutation, sharing.control_map);
                 if (failed(pm.run(modOp))) {
                   return signalPassFailure();
                 }
                 destroy_performance_model(&builder, current_permutation);
-                //check if no performance loss, if yes, break
-                if(occupancy_sum == data.occupancySum) {
+                if(equal(occupancy_sum, data.occupancySum)) {
                   finalOrd = current_permutation;
                   break;
                 }
@@ -251,6 +249,7 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
             if(finalOrd.size() != 0) {
                 //Merge groups, update ordering and update shared occupancy
                 set.joinGroups(pair.first, pair.second, finalOrd);
+                groups_modified = true;
                 break;
             }
           }
@@ -263,8 +262,9 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
 
     // Sharing other units
     op_type.sharingOtherUnits();
-
-    break;
+    
+    // print final grouping
+    op_type.printFinalGroup();
   }
 }
 

@@ -1,6 +1,7 @@
 #ifndef EXPERIMENTAL_INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_SHARINGFRAMEWORK_H
 #define EXPERIMENTAL_INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_SHARINGFRAMEWORK_H
 
+#include "experimental/Transforms/ResourceSharing/NameUniquer.h"
 #include "experimental/Transforms/ResourceSharing/FCCM22Sharing.h"
 #include "experimental/Transforms/ResourceSharing/SCC.h"
 #include "experimental/Transforms/ResourceSharing/modIR.h"
@@ -168,6 +169,9 @@ struct Set {
   // join another set to this specific set 
   // important: while joining, one group of each set is paired with one group of the other set
   void joinSet(Set *joined_element);
+  
+  // print content of specific set
+  void print(NameUniquer names);
 
   //Constructors
   Set(double latency) {
@@ -189,6 +193,7 @@ struct Set {
        can be treated separately
 */
 //OperationTypeStruct
+//ResourceSharingForSingleType
 struct OpSelector {
   double op_latency;
   llvm::StringRef identifier;

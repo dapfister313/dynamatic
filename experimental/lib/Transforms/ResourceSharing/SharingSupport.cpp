@@ -29,7 +29,7 @@ std::vector<ResourceSharingInfo::OperationData> MyFPGA20Buffers::getData() {
 double MyFPGA20Buffers::getOccupancySum(std::set<Operation*>& group) {
     std::map<Operation*, double> occupancies;
     for(auto item : group) {
-        occupancies[item] = 0.0;
+        occupancies[item] = -1.0;
     }
     double throughput, latency, occupancy;
     for (auto [idx, cfdfcWithVars] : llvm::enumerate(vars.cfVars)) {
@@ -48,6 +48,7 @@ double MyFPGA20Buffers::getOccupancySum(std::set<Operation*>& group) {
     }
     double sum = 0.0;
     for(auto item : occupancies) {
+        assert(item.second > 0 && "Incorrect occupancy\n");
         sum += item.second;
     }
     return sum;
@@ -56,8 +57,11 @@ double MyFPGA20Buffers::getOccupancySum(std::set<Operation*>& group) {
 LogicalResult MyFPGA20Buffers::addSyncConstraints(std::vector<Value> opaqueChannel) {
     for(auto channel : opaqueChannel) {
         ChannelVars &chVars = vars.channelVars[channel];
+        auto dataIt = chVars.signalVars.find(SignalType::DATA);
+        GRBVar &dataOpaque = dataIt->second.bufPresent;
         GRBVar &opaque = chVars.bufPresent;
         model.addConstr(opaque == 1.0, "additional_opaque_channel");
+        model.addConstr(dataOpaque == 1.0, "additional_opaque_channel");
     }
     return success();
 }
