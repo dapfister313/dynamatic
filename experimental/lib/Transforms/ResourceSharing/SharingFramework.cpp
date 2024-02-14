@@ -291,7 +291,7 @@ std::vector<int> ResourceSharing::performSCC_bbl() {
 }
 
 void ResourceSharing::performSCC_opl(std::set<mlir::Operation*>& result) {
-    Kosarajus_algorithm_OPL(firstOp, result, OpTopologicalOrder);
+    Kosarajus_algorithm_OPL(firstOp, result);
 }
 
 void ResourceSharing::print() {

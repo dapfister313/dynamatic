@@ -321,7 +321,7 @@ void get_noncyclic_operations(std::map<Operation*,std::list<Operation*>>& adjace
     return;
 }
 
-void Kosarajus_algorithm_OPL(mlir::Operation* startOp, std::set<mlir::Operation*>& result, std::map<Operation *, unsigned int>& topological_sort) {
+void Kosarajus_algorithm_OPL(mlir::Operation* startOp, std::set<mlir::Operation*>& result) {
     std::map<Operation*,std::list<Operation*>> adjacency_list;
     std::stack<Operation *> DFSstack;
     create_adjacency_list_opl(startOp, adjacency_list, DFSstack);
