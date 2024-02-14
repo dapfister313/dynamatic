@@ -246,9 +246,9 @@ void ResourceSharing::retrieveDataFromPerformanceAnalysis(ResourceSharingInfo sh
             OpNames[OpName] = number_of_operation_types;
             OpIdx = number_of_operation_types;
             ++number_of_operation_types;
-            operation_types.push_back(ResourceSharingForSingleType(latency, OpName));
+            operationTypes.push_back(ResourceSharingForSingleType(latency, OpName));
         }
-        ResourceSharingForSingleType& OpT = operation_types[OpIdx];
+        ResourceSharingForSingleType& OpT = operationTypes[OpIdx];
 
         //choose the right set
         int SetIdx = -1;
@@ -304,7 +304,7 @@ void ResourceSharing::print() {
     for(; it != throughput.end(); it++) {
         llvm::errs() << "CFDFC #" << it->first << ": " << it->second << "\n";
     }
-    for(auto Op : operation_types) {
+    for(auto Op : operationTypes) {
         llvm::errs() << "\n*** New Operation type: " << Op.identifier << " ***\n";
         for(auto set : Op.sets) {
             llvm::errs() << "** New set **\n";

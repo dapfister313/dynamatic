@@ -253,7 +253,7 @@ public:
   // stores control merge and branch of each BB
   std::map<int, controlStructure> control_map;
 
-  std::vector<ResourceSharingForSingleType> operation_types;
+  std::vector<ResourceSharingForSingleType> operationTypes;
   
   // set first operation of the IR
   void setFirstOp(Operation *op);

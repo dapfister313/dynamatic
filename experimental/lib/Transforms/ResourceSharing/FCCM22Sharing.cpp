@@ -171,6 +171,7 @@ struct ResourceSharingFCCM22Pass
   void runDynamaticPass() override;
 };
 
+// this runs performance analysis of one permutation
 bool runPerformanceAnalysisOfOnePermutation(ResourceSharingInfo &data, std::vector<Operation*>& current_permutation,
                                             ResourceSharing& sharing, OpBuilder* builder, PassManager& pm, ModuleOp& modOp) {
     deleteAllBuffers(data.funcOp);
@@ -182,6 +183,26 @@ bool runPerformanceAnalysisOfOnePermutation(ResourceSharingInfo &data, std::vect
     return true;
 }
 
+typedef std::vector<Operation*>::iterator PermutationEdge;
+
+void findBBEdges(std::vector<std::pair<int, int>>& BBops, std::vector<Operation*>& current_permutation) {
+  int size = current_permutation.size();
+  int start, end = 0;
+  while(end != size) {
+    start = end;
+    unsigned int BasicBlockId = getLogicBB(current_permutation[start]).value();
+    while(getLogicBB(current_permutation[end]).value() == BasicBlockId) {
+      ++end;
+    }
+    BBops.push_back(std::make_pair(start, end));
+  }
+}
+
+void get_next_permutation(PermutationEdge start, PermutationEdge end, std::vector<std::pair<int, int>>& BBops) {
+  return;
+}
+
+// this runs performance analysis of two groups
 bool runPerformanceAnalysis(GroupIt group1, GroupIt group2, double occupancy_sum, ResourceSharingInfo &data, OpBuilder* builder, 
                             PassManager& pm, ModuleOp& modOp, std::vector<Operation*>& finalOrd, ResourceSharing& sharing) {
     // Search for best group ordering
@@ -190,7 +211,11 @@ bool runPerformanceAnalysis(GroupIt group1, GroupIt group2, double occupancy_sum
     current_permutation.insert(current_permutation.end(), group2->items.begin(), group2->items.end());
     data.testedGroups.clear();
     std::copy(current_permutation.begin(), current_permutation.end(), std::inserter(data.testedGroups, data.testedGroups.end()));
-    std::sort(current_permutation.begin(), current_permutation.end());
+    //sort permutation vector in basic blocks
+    std::sort(current_permutation.begin(), current_permutation.end(), [](Operation *a, Operation *b) -> bool {return (getLogicBB(a) < getLogicBB(b)) || (getLogicBB(a) == getLogicBB(b) && (a < b));});
+    //find first and last element of each basic block
+    std::vector<std::pair<int, int>> BBops;
+    findBBEdges(BBops, current_permutation);
 
     do {
         if(runPerformanceAnalysisOfOnePermutation(data, current_permutation,sharing, builder, pm, modOp) == false) {
@@ -237,31 +262,30 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
   data.fullReportRequired = false;
   
   // iterating over different operation types
-  for(auto& op_type : sharing.operation_types) {
+  for(auto& operationType : sharing.operationTypes) {
     // Sharing within a loop nest
-    for(auto& set : op_type.sets) {
+    for(auto& set : operationType.sets) {
       bool groups_modified = true;
       while(groups_modified) {
         groups_modified = false;
         std::vector<std::pair<GroupIt, GroupIt>> combination = combinations(&set);
         //iterate over combinations of groups
-        for(auto pair : combination) {
+        for(auto [group1, group2] : combination) {
           //check if sharing is potentially possible
-          double occupancy_sum = pair.first->shared_occupancy + pair.second->shared_occupancy;
+          double occupancy_sum = group1->shared_occupancy + group2->shared_occupancy;
           
-          //change to separate function!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-          if(lessOrEqual(occupancy_sum, op_type.op_latency)) {
+          if(lessOrEqual(occupancy_sum, operationType.op_latency)) {
             std::vector<Operation*> finalOrd;
             //check if operations on loop
-            if(!pair.first->hasCycle && !pair.second->hasCycle) {
-              finalOrd = sharing.sortTopologically(pair.first, pair.second);
+            if(!group1->hasCycle && !group2->hasCycle) {
+              finalOrd = sharing.sortTopologically(group1, group2);
             } else {
-              runPerformanceAnalysis(pair.first, pair.second, occupancy_sum, data, &builder, 
+              runPerformanceAnalysis(group1, group2, occupancy_sum, data, &builder, 
                                      pm, modOp, finalOrd, sharing);
             }
             if(finalOrd.size() != 0) {
                 //Merge groups, update ordering and update shared occupancy
-                set.joinGroups(pair.first, pair.second, finalOrd);
+                set.joinGroups(group1, group2, finalOrd);
                 groups_modified = true;
                 break;
             }
@@ -271,13 +295,13 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
     }
     
     // Sharing across loop nests
-    op_type.sharingAcrossLoopNests();
+    operationType.sharingAcrossLoopNests();
 
     // Sharing other units
-    op_type.sharingOtherUnits();
+    operationType.sharingOtherUnits();
     
     // print final grouping
-    op_type.printFinalGroup();
+    operationType.printFinalGroup();
   }
 }
 
