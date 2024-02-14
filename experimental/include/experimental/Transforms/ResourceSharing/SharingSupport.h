@@ -69,44 +69,52 @@ using namespace dynamatic::experimental::sharing;
 //std::max
 #include <algorithm>
 #include <list>
+#include <deque>
 
 namespace dynamatic {
 namespace experimental {
 namespace sharing {
 
-//create all possible pairs of Groups in a specific set
-inline std::vector<std::pair<GroupIt, GroupIt>> combinations(Set *set) {
-    std::vector<std::pair<GroupIt, GroupIt>> result;
-    for(GroupIt g1 = set->groups.begin(); g1 != set->groups.end(); g1++) {
-        GroupIt g2 = g1;
-        g2++;
-        for( ; g2 != set->groups.end(); g2++) {
-            result.push_back(std::make_pair(g1, g2));
-        }
-    }
-    return result;
-}
+// create all possible pairs of Groups in a specific set
+std::vector<std::pair<GroupIt, GroupIt>> combinations(Set *set);
 
-inline bool equal(double a, double b) {
-    double diff = 0.000001;
-    if((a + diff > b)  && (b + diff > a)) {
-        return true;
-    }
-    return false;
-}
+// test if two doubles are equal
+bool equal(double a, double b);
 
-inline bool lessOrEqual(double a, double b) {
-    double diff = 0.000001;
-    if((a < b + diff)) {
-        return true;
-    }
-    return false;
-}
+// test if a double is less or equal than an other double
+bool lessOrEqual(double a, double b);
 
 } // namespace sharing
 } // namespace experimental
 } // namespace dynamatic
 
+namespace permutation {
+
+typedef std::vector<Operation*>::iterator PermutationEdge;
+
+// input: vector of Operations
+// changes input: sort vector in BB regions and sort those with regular definition of "less" in Operation class
+// output: starting and ending operations of every present basic block
+/*
+ * example: state: BB1{Op1, Op2}, BB2{Op3, Op4, Op5}
+ *          input: {Op3, Op2, Op1, Op5, Op4}
+ *          change to: {Op1, Op2, Op3, Op4, Op5}
+ *          output: {0,2},{2,5} 
+ */
+void findBBEdges(std::deque<std::pair<int, int>>& BBops, std::vector<Operation*>& permutation_vector);
+
+// inputs: permutation_vector.begin(), output of function findBBEdges
+// changes: permutation_vector to the next permutation step
+// output: false if all permuations visited, else true
+/*
+ * further information: This is a extended version of next_permutation in package algorithm.
+ *                      As we do not need to permute operations of different basic blocks,
+ *                      this function does exactly only permute within a BB region and
+ *                      goes over all combinations of permutations of different BBs.
+ */
+bool get_next_permutation(PermutationEdge begin_of_permutation_vector, std::deque<std::pair<int, int>>& separation_of_BBs);
+
+} // namespace permuation
 
 namespace dynamatic {
 namespace buffer {

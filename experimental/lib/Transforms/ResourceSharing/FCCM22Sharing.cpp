@@ -184,55 +184,30 @@ bool runPerformanceAnalysisOfOnePermutation(ResourceSharingInfo &data, std::vect
     return true;
 }
 
-typedef std::vector<Operation*>::iterator PermutationEdge;
-
-void findBBEdges(std::deque<std::pair<int, int>>& BBops, std::vector<Operation*>& current_permutation) {
-  int size = current_permutation.size();
-  int start, end = 0;
-  while(end != size) {
-    start = end;
-    unsigned int BasicBlockId = getLogicBB(current_permutation[start]).value();
-    while(end != size && getLogicBB(current_permutation[end]).value() == BasicBlockId) {
-      ++end;
-    }
-    BBops.push_front(std::make_pair(start, end));
-  }
-}
-
-
-bool get_next_permutation(PermutationEdge start, std::deque<std::pair<int, int>>& BBops, int size, std::vector<Operation*>& current_permutation) {
-  for(auto [start, end] : BBops) {
-    if(next_permutation (current_permutation.begin() + start, current_permutation.end() + end)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 // this runs performance analysis of two groups
 bool runPerformanceAnalysis(GroupIt group1, GroupIt group2, double occupancy_sum, ResourceSharingInfo &data, OpBuilder* builder, 
                             PassManager& pm, ModuleOp& modOp, std::vector<Operation*>& finalOrd, ResourceSharing& sharing) {
-    // Search for best group ordering
+    // put operations of both groups in a single vector
     std::vector<Operation*> current_permutation;
     current_permutation.insert(current_permutation.end(), group1->items.begin(), group1->items.end());
     current_permutation.insert(current_permutation.end(), group2->items.begin(), group2->items.end());
+
+    // convert data from "current_permutation" vector to " data.testedGroups" set
     data.testedGroups.clear();
     std::copy(current_permutation.begin(), current_permutation.end(), std::inserter(data.testedGroups, data.testedGroups.end()));
-    //sort permutation vector in basic blocks
-    std::sort(current_permutation.begin(), current_permutation.end(), [](Operation *a, Operation *b) -> bool {return (getLogicBB(a) < getLogicBB(b)) || (getLogicBB(a) == getLogicBB(b) && (a < b));});
-    //find first and last element of each basic block
-    std::deque<std::pair<int, int>> BBops;
-    findBBEdges(BBops, current_permutation);
+    
+    // run performance analysis for each permutation
     do {
         if(runPerformanceAnalysisOfOnePermutation(data, current_permutation,sharing, builder, pm, modOp) == false) {
           return false;
         }
+        // exit if no performance loss
         if(equal(occupancy_sum, data.occupancySum)) {
             finalOrd = current_permutation;
-            break;
+            return true;
         }
     } while (next_permutation (current_permutation.begin(), current_permutation.end()));
-    return true;
+    return false;
 }
 
 } // namespace

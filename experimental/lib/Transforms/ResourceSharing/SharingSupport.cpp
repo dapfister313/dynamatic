@@ -1,8 +1,13 @@
 #include "experimental/Transforms/ResourceSharing/SharingSupport.h"
 
-using namespace dynamatic::experimental::sharing;
+//using namespace dynamatic::experimental::sharing;
 
 using namespace dynamatic::buffer::fpga20;
+
+
+/*
+ * Extending FPGA20Buffers class
+ */
 
 std::vector<ResourceSharingInfo::OperationData> MyFPGA20Buffers::getData() {
     std::vector<ResourceSharingInfo::OperationData> return_info;
@@ -10,15 +15,12 @@ std::vector<ResourceSharingInfo::OperationData> MyFPGA20Buffers::getData() {
     double throughput, latency;
     for (auto [idx, cfdfcWithVars] : llvm::enumerate(vars.cfVars)) {
         auto [cf, cfVars] = cfdfcWithVars;
-        // for each CFDFC, extract the throughput in double format
         throughput = cfVars.throughput.get(GRB_DoubleAttr_X);
 
         for (auto &[op, unitVars] : cfVars.unitVars) {
         sharing_item.op = op;
         if (failed(timingDB.getLatency(op, SignalType::DATA, latency)) || latency == 0.0)
             continue;
-        // the occupancy of the unit is calculated as the product between
-        // throughput and latency
         sharing_item.occupancy = latency * throughput;
         return_info.push_back(sharing_item);
         }
@@ -65,3 +67,65 @@ LogicalResult MyFPGA20Buffers::addSyncConstraints(std::vector<Value> opaqueChann
     }
     return success();
 }
+
+
+/*
+ * additional functions used for resource sharing
+ */
+
+bool dynamatic::experimental::sharing::lessOrEqual(double a, double b) {
+    double diff = 0.000001;
+    if((a < b + diff)) {
+        return true;
+    }
+    return false;
+}
+
+bool dynamatic::experimental::sharing::equal(double a, double b) {
+    double diff = 0.000001;
+    if((a + diff > b)  && (b + diff > a)) {
+        return true;
+    }
+    return false;
+}
+
+std::vector<std::pair<GroupIt, GroupIt>> dynamatic::experimental::sharing::combinations(Set *set) {
+    std::vector<std::pair<GroupIt, GroupIt>> result;
+    for(GroupIt g1 = set->groups.begin(); g1 != set->groups.end(); g1++) {
+        GroupIt g2 = g1;
+        g2++;
+        for( ; g2 != set->groups.end(); g2++) {
+            result.push_back(std::make_pair(g1, g2));
+        }
+    }
+    return result;
+}
+
+
+/*
+ *   indroducing version of next_permutation
+ */
+
+void permutation::findBBEdges(std::deque<std::pair<int, int>>& BBops, std::vector<Operation*>& permutation_vector) {
+    std::sort(permutation_vector.begin(), permutation_vector.end(), [](Operation *a, Operation *b) -> bool {return (getLogicBB(a) < getLogicBB(b)) || (getLogicBB(a) == getLogicBB(b) && (a < b));});
+    int size = permutation_vector.size();
+    int start, end = 0;
+    while(end != size) {
+        start = end;
+        unsigned int BasicBlockId = getLogicBB(permutation_vector[start]).value();
+        while(end != size && getLogicBB(permutation_vector[end]).value() == BasicBlockId) {
+            ++end;
+        }
+        BBops.push_front(std::make_pair(start, end));
+    }
+}
+
+bool permutation::get_next_permutation(PermutationEdge begin_of_permutation_vector, std::deque<std::pair<int, int>>& separation_of_BBs) {
+    for(auto [start, end] : separation_of_BBs) {
+        if(next_permutation (begin_of_permutation_vector + start, begin_of_permutation_vector + end)) {
+          return true;
+        }
+    }
+    return false;
+}
+
