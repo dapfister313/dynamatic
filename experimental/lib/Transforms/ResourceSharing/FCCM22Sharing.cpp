@@ -83,6 +83,7 @@ using namespace dynamatic::experimental::sharing;
 //std::max
 #include <algorithm>
 #include <list>
+#include <deque>
 
 namespace {
 
@@ -185,21 +186,27 @@ bool runPerformanceAnalysisOfOnePermutation(ResourceSharingInfo &data, std::vect
 
 typedef std::vector<Operation*>::iterator PermutationEdge;
 
-void findBBEdges(std::vector<std::pair<int, int>>& BBops, std::vector<Operation*>& current_permutation) {
+void findBBEdges(std::deque<std::pair<int, int>>& BBops, std::vector<Operation*>& current_permutation) {
   int size = current_permutation.size();
   int start, end = 0;
   while(end != size) {
     start = end;
     unsigned int BasicBlockId = getLogicBB(current_permutation[start]).value();
-    while(getLogicBB(current_permutation[end]).value() == BasicBlockId) {
+    while(end != size && getLogicBB(current_permutation[end]).value() == BasicBlockId) {
       ++end;
     }
-    BBops.push_back(std::make_pair(start, end));
+    BBops.push_front(std::make_pair(start, end));
   }
 }
 
-void get_next_permutation(PermutationEdge start, PermutationEdge end, std::vector<std::pair<int, int>>& BBops) {
-  return;
+
+bool get_next_permutation(PermutationEdge start, std::deque<std::pair<int, int>>& BBops, int size, std::vector<Operation*>& current_permutation) {
+  for(auto [start, end] : BBops) {
+    if(next_permutation (current_permutation.begin() + start, current_permutation.end() + end)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 // this runs performance analysis of two groups
@@ -214,9 +221,8 @@ bool runPerformanceAnalysis(GroupIt group1, GroupIt group2, double occupancy_sum
     //sort permutation vector in basic blocks
     std::sort(current_permutation.begin(), current_permutation.end(), [](Operation *a, Operation *b) -> bool {return (getLogicBB(a) < getLogicBB(b)) || (getLogicBB(a) == getLogicBB(b) && (a < b));});
     //find first and last element of each basic block
-    std::vector<std::pair<int, int>> BBops;
+    std::deque<std::pair<int, int>> BBops;
     findBBEdges(BBops, current_permutation);
-
     do {
         if(runPerformanceAnalysisOfOnePermutation(data, current_permutation,sharing, builder, pm, modOp) == false) {
           return false;
