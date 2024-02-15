@@ -1,30 +1,11 @@
 #ifndef EXPERIMENTAL_INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_SCC_H
 #define EXPERIMENTAL_INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_SCC_H
 
-#include "dynamatic/Dialect/Handshake/HandshakeDialect.h"
-#include "dynamatic/Dialect/Handshake/HandshakeOps.h"
-//#include "dynamatic/Dialect/Handshake/HandshakePasses.h"
-#include "dynamatic/Support/Logging.h"
-//#include "dynamatic/Support/LogicBB.h"
-#include "dynamatic/Support/CFG.h"
-#include "dynamatic/Transforms/BufferPlacement/CFDFC.h"
-#include "dynamatic/Transforms/BufferPlacement/FPGA20Buffers.h"
+#include "mlir/IR/Operation.h"
 #include "experimental/Support/StdProfiler.h"
-#include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/IR/BuiltinTypes.h"
-#include "mlir/IR/OperationSupport.h"
-#include "mlir/IR/PatternMatch.h"
-#include "mlir/Support/IndentedOstream.h"
-#include "experimental/Support/StdProfiler.h"
-#include "dynamatic/Support/LLVM.h"
-
-#include "dynamatic/Transforms/BufferPlacement/FPGA20Buffers.h"
-//#include "dynamatic/Transforms/BufferPlacement/HandshakeIterativeBuffers.h"
-#include "dynamatic/Dialect/Handshake/HandshakeOps.h"
-#include "mlir/IR/MLIRContext.h"
-
+#include "llvm/ADT/SmallVector.h"
 #include <vector>
+#include <set>
 
 namespace dynamatic {
 namespace experimental {

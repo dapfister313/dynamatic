@@ -10,14 +10,11 @@
 
 #include "experimental/Transforms/ResourceSharing/SCC.h"
 
-#include <vector>
 #include <list>
-#include <iostream>
 #include <stack>
 #include <algorithm>
 
 using namespace dynamatic::experimental;
-using namespace dynamatic::handshake;
 using namespace llvm;
 using namespace dynamatic;
 
@@ -45,12 +42,12 @@ void print_list(std::vector<std::list<int>>& adjacency_list) {
  * Dumps content of stack to the console
  */
 void print_stack(std::stack<int> DFSstack) {
-    std::cout << "Printing stack: ";
+    llvm::errs() << "Printing stack: ";
     while(!DFSstack.empty()) {
-        std::cout << DFSstack.top() << " ";
+        llvm::errs() << DFSstack.top() << " ";
         DFSstack.pop();
     }
-    std::cout << "\n";
+    llvm::errs() << "\n";
     return;
 }
 
