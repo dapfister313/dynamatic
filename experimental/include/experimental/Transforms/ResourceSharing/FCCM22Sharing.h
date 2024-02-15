@@ -13,13 +13,9 @@
 #ifndef EXPERIMENTAL_INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_FCCM22SHARING_H
 #define EXPERIMENTAL_INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_FCCM22SHARING_H
 
-#include "dynamatic/Support/DynamaticPass.h"
-#include "dynamatic/Support/LLVM.h"
-#include "mlir/Pass/Pass.h"
-#include "dynamatic/Support/CFG.h"
-
-using namespace dynamatic;
-
+#include "mlir/Pass/PassManager.h"
+#include "experimental/Transforms/ResourceSharing/SharingSupport.h"
+#include "dynamatic/Transforms/BufferPlacement/HandshakePlaceBuffers.h"
 
 namespace dynamatic {
 namespace experimental {
