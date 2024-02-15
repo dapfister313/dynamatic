@@ -1,7 +1,5 @@
 #include "experimental/Transforms/ResourceSharing/SharingSupport.h"
 
-//using namespace dynamatic::experimental::sharing;
-
 using namespace dynamatic::buffer::fpga20;
 
 
