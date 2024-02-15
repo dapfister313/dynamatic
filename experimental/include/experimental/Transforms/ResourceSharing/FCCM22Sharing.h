@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file declares the --resource-sharing-FCCM22 pass.
+// This file declares the ResourceSharingFCCM22 pass.
 //
 //===----------------------------------------------------------------------===//
 

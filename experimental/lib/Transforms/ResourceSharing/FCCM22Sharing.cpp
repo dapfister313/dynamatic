@@ -1,7 +1,14 @@
-//===- FCCM22Sharing.h - resource-sharing -----*- C++ -*-===//
+//===- FCCM22Sharing.cpp - Resource Sharing ---------*- C++ -*-===//
 //
-// Implements the --resource-sharing pass, which checks for sharable
-// Operations (sharable means little to no performance overhead).
+// Dynamatic is under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+// Implements the ResourceSharingFCCM22Pass, which checks for sharable
+// Operations (sharable means little or no performance overhead).
+//
 //===----------------------------------------------------------------------===//
 
 #include "experimental/Transforms/ResourceSharing/FCCM22Sharing.h"
@@ -146,7 +153,7 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
   TimingDatabase timingDB(&getContext());
   if (failed(TimingDatabase::readFromJSON(timingModels, timingDB)))
     return signalPassFailure();
-
+  
   // running buffer placement on current module
   mlir::PassManager pm(&getContext());
   pm.addPass(std::make_unique<ResourceSharingFCCM22PerformancePass>(
@@ -162,6 +169,9 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
   // from now on we are only interested in the occupancy sum
   data.fullReportRequired = false;
   
+  // determines if two Groups already tried to merge
+  std::map<Group, std::set<Group>> alreadyTested;
+
   // iterating over different operation types
   for(auto& operationType : sharing.operationTypes) {
     // Sharing within a loop nest
@@ -169,7 +179,7 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
       bool groups_modified = true;
       while(groups_modified) {
         groups_modified = false;
-        std::vector<std::pair<GroupIt, GroupIt>> combination = combinations(&set);
+        std::vector<std::pair<GroupIt, GroupIt>> combination = combinations(&set, alreadyTested);
         //iterate over combinations of groups
         for(auto [group1, group2] : combination) {
           //check if sharing is potentially possible
@@ -189,6 +199,9 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
                 set.joinGroups(group1, group2, finalOrd);
                 groups_modified = true;
                 break;
+            } else {
+              alreadyTested[*group1].insert(*group2);
+              alreadyTested[*group2].insert(*group1);
             }
           }
         }

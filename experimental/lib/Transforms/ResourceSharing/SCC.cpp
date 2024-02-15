@@ -1,12 +1,18 @@
-/*
- *     [info] This file contains an algorithm that takes a graph with n nodes
- *            and returns the Strongly connected components in this graph
- *     [info] The algorithm works well with low edge to node ratio
- *            If this is not the case one might consider usng an other algorithm
- *     Implementation of Kosaraju's algorithm
- *     Explanatory video: https://www.youtube.com/watch?v=Qdh6-a_2MxE&t=328s
- *     Tested using: https://www.geeksforgeeks.org/problems/strongly-connected-components-kosarajus-algo/1?utm_source=geeksforgeeks&utm_medium=ml_article_practice_tab&utm_campaign=article_practice_tab
- */
+//===- SCC.cpp - Strongly Connected Components ------------------*- C++ -*-===//
+//
+// Dynamatic is under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+//     This file contains an algorithm that takes a graph with n nodes
+//            and returns the Strongly connected components in this graph
+//     The algorithm works well with low edge to node ratio
+//            If this is not the case one might consider usng an other algorithm
+//     Implementation of Kosaraju's algorithm
+//     Explanatory video: https://www.youtube.com/watch?v=Qdh6-a_2MxE&t=328s
+//===----------------------------------------------------------------------===//
 
 #include "experimental/Transforms/ResourceSharing/SCC.h"
 

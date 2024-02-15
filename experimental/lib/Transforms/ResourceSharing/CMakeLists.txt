@@ -1,9 +1,7 @@
 add_dynamatic_library(ResourceSharingFCCM22
   FCCM22Sharing.cpp
   SCC.cpp
-  modIR.cpp
   SharingSupport.cpp
-  SharingFramework.cpp
 
   DEPENDS
   DynamaticExperimentalTransformsPassIncGen
