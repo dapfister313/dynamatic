@@ -1,7 +1,6 @@
 #include "experimental/Transforms/ResourceSharing/modIR.h"
 
 using namespace dynamatic::handshake;
-using namespace dynamatic::experimental::sharing;
 
 namespace dynamatic {
 namespace experimental {
@@ -95,7 +94,7 @@ mlir::OpResult add_fork(OpBuilder* builder, mlir::OpResult connectionPoint) {
 //handshake::SinkOp
 void addSink(OpBuilder* builder, mlir::OpResult* connectionPoint) {
     builder->setInsertionPointAfter(connectionPoint->getOwner()->getOperand(0).getDefiningOp());
-    auto newSinkOp = builder->create<SinkOp>(connectionPoint->getLoc(), *connectionPoint);
+    builder->create<SinkOp>(connectionPoint->getLoc(), *connectionPoint);
 }
 
 //handshake::ConstantOp

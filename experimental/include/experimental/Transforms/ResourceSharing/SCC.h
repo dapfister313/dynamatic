@@ -1,11 +1,15 @@
 #ifndef EXPERIMENTAL_INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_SCC_H
 #define EXPERIMENTAL_INCLUDE_DYNAMATIC_TRANSFORMS_RESOURCESHARING_SCC_H
 
-#include "mlir/IR/Operation.h"
-#include "experimental/Support/StdProfiler.h"
-#include "llvm/ADT/SmallVector.h"
-#include <vector>
 #include <set>
+#include <list>
+#include <stack>
+#include <vector>
+#include <algorithm>
+
+#include "mlir/IR/Operation.h"
+#include "llvm/ADT/SmallVector.h"
+#include "experimental/Support/StdProfiler.h"
 
 namespace dynamatic {
 namespace experimental {

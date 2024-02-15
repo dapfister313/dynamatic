@@ -10,15 +10,6 @@
 
 #include "experimental/Transforms/ResourceSharing/SCC.h"
 
-#include <list>
-#include <stack>
-#include <algorithm>
-
-using namespace dynamatic::experimental;
-using namespace llvm;
-using namespace dynamatic;
-
-
 namespace dynamatic {
 namespace experimental {
 namespace sharing {
