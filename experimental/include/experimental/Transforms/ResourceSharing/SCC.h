@@ -9,6 +9,7 @@
 
 #include "mlir/IR/Operation.h"
 #include "llvm/ADT/SmallVector.h"
+#include "dynamatic/Support/CFG.h"
 #include "experimental/Support/StdProfiler.h"
 
 namespace dynamatic {
@@ -19,7 +20,7 @@ namespace sharing {
 std::vector<int> Kosarajus_algorithm_BBL(SmallVector<ArchBB> archs);
 
 // different implementation: performed on operation level
-void Kosarajus_algorithm_OPL(mlir::Operation* startOp, std::set<mlir::Operation*>& result);
+void Kosarajus_algorithm_OPL(mlir::Operation* startOp, handshake::FuncOp *funcOp, std::set<mlir::Operation*>& result);
 
 } // namespace sharing
 } // namespace experimental

@@ -13,6 +13,7 @@
 
 using namespace dynamatic;
 using namespace dynamatic::handshake;
+using namespace mlir::func;
 
 namespace dynamatic {
 namespace experimental {
@@ -35,8 +36,7 @@ struct ResourceSharingInfo {
     // used to perform SCC-computation (finding strongly connected components)
     SmallVector<dynamatic::experimental::ArchBB> archs;
 
-    // handshake::FuncOp
-    FuncOp funcOp;
+    handshake::FuncOp funcOp;
 
     // list of values where to insert a seq buffer
     std::vector<Value> opaqueChannel = {};
@@ -201,12 +201,12 @@ public:
   Operation *getFirstOp();
 
   // compute first operation of the IR
-  bool computeFirstOp(FuncOp funcOp);
+  bool computeFirstOp(handshake::FuncOp funcOp);
   
   // calculate the topological ordering of all operations
   // important: operations on a cycle do not have a topological order
   //            but are still present
-  void initializeTopolocialOpSort();
+  void initializeTopolocialOpSort(handshake::FuncOp *funcOp);
 
   // print operations in topological order
   void printTopologicalOrder();
@@ -230,14 +230,14 @@ public:
   std::vector<int> performSCC_bbl();
   
   // perform SCC-agorithm on operation level
-  void performSCC_opl(std::set<mlir::Operation*>& result);
+  void performSCC_opl(std::set<mlir::Operation*>& result, handshake::FuncOp *funcOp);
   
   // print source-destination BB of connection between BBs, throughput per CFDFC and 
   // the composition in operation-type, set, group
   void print();
   
   // find control structure of each BB: control_merge, control_branch
-  void getControlStructure(FuncOp funcOp);
+  void getControlStructure(handshake::FuncOp funcOp);
 
   // place and compute all necessary data to perform resource sharing
   void placeAndComputeNecessaryDataFromPerformanceAnalysis(ResourceSharingInfo data, TimingDatabase timingDB);

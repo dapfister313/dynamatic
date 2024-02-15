@@ -159,7 +159,7 @@ void ResourceSharing::recursiveDFStravel(Operation *op, unsigned int *position, 
     return;
 }
 
-bool ResourceSharing::computeFirstOp(FuncOp funcOp) {
+bool ResourceSharing::computeFirstOp(handshake::FuncOp funcOp) {
     // If we are in the entry block, we can use the start input of the
     // function (last argument) as our control value
     if(!funcOp.getArguments().back().getType().isa<NoneType>()) {
@@ -180,13 +180,19 @@ Operation *ResourceSharing::getFirstOp() {
     return firstOp;
 }
 
-void ResourceSharing::initializeTopolocialOpSort() {
+void ResourceSharing::initializeTopolocialOpSort(handshake::FuncOp *funcOp) {
     if(firstOp == nullptr) {
         llvm::errs() << "[Error] Operation directly after start not yet present\n";
     }
     unsigned int position = 0;
     std::set<mlir::Operation*> node_visited;
     recursiveDFStravel(firstOp, &position, node_visited);
+    for (Operation &op : funcOp->getOps()) {
+        auto it = node_visited.find(&op);
+        if(it == node_visited.end()) {
+            recursiveDFStravel(&op, &position, node_visited);
+        }
+    }
     return;
 }
 
@@ -290,8 +296,8 @@ std::vector<int> ResourceSharing::performSCC_bbl() {
     return Kosarajus_algorithm_BBL(archs);
 }
 
-void ResourceSharing::performSCC_opl(std::set<mlir::Operation*>& result) {
-    Kosarajus_algorithm_OPL(firstOp, result);
+void ResourceSharing::performSCC_opl(std::set<mlir::Operation*>& result, handshake::FuncOp *funcOp) {
+    Kosarajus_algorithm_OPL(firstOp, funcOp, result);
 }
 
 void ResourceSharing::print() {
@@ -316,7 +322,7 @@ void ResourceSharing::print() {
     }
 }
 
-void ResourceSharing::getControlStructure(FuncOp funcOp) {
+void ResourceSharing::getControlStructure(handshake::FuncOp funcOp) {
     controlStructure control_item;
     unsigned int BB_idx = 0;
     for (Operation &op : funcOp.getOps()) {
@@ -348,11 +354,11 @@ void ResourceSharing::placeAndComputeNecessaryDataFromPerformanceAnalysis(Resour
     computeFirstOp(data.funcOp);
 
     // initialize topological sorting to determine topological order
-    initializeTopolocialOpSort();
+    initializeTopolocialOpSort(&data.funcOp);
     
     // find non-cyclic operations
     std::set<mlir::Operation*> ops_with_no_loops;
-    performSCC_opl(ops_with_no_loops);
+    performSCC_opl(ops_with_no_loops, &data.funcOp);
     
     // get the connections between basic blocks
     getListOfControlFlowEdges(data.archs);

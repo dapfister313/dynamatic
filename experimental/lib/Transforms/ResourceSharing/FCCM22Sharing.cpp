@@ -158,27 +158,6 @@ void ResourceSharingFCCM22Pass::runDynamaticPass() {
 
   // placing data retrieved from buffer placement
   ResourceSharing sharing(data, timingDB);
-  std::set<mlir::Operation*> result;
-  Kosarajus_algorithm_OPL(sharing.getFirstOp(), result);
-  llvm::errs() << "Operations: ";
-  for(auto op : result) {
-    llvm::errs() << op << ", ";
-  }
-  llvm::errs() << "\n";
-  Group g(sharing.getFirstOp());
-  for (Operation &op : data.funcOp.getOps()) {
-    auto it = result.find(&op);
-    if(g.determineIfCyclic(&op)) {
-      if(it != result.end()) {
-        llvm::errs() << "Operation present even though cyclic\n";
-      }
-    } else {
-      if(it == result.end()) {
-        llvm::errs() << "Operation not present even though not cyclic: " << op << "\n";
-      }
-    }
-  }
-  llvm::errs() << "\n";
 
   // from now on we are only interested in the occupancy sum
   data.fullReportRequired = false;

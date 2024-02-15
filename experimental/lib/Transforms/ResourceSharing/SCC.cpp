@@ -251,9 +251,15 @@ void recursive_list_creator_opl(mlir::Operation* currOp, std::map<Operation*,std
     return;
 }
 
-void create_adjacency_list_opl(mlir::Operation* startOp, std::map<Operation*,std::list<Operation*>>& adjacency_list, std::stack<Operation*>& DFSstack) {
+void create_adjacency_list_opl(mlir::Operation* startOp, std::map<Operation*,std::list<Operation*>>& adjacency_list, std::stack<Operation*>& DFSstack, handshake::FuncOp *funcOp) {
     std::set<mlir::Operation*> node_visited;
     recursive_list_creator_opl(startOp, adjacency_list, node_visited, DFSstack);
+    for (Operation &op : funcOp->getOps()) {
+        auto it = node_visited.find(&op);
+        if(it == node_visited.end()) {
+            recursive_list_creator_opl(&op, adjacency_list, node_visited, DFSstack);
+        }
+    }
     return;
 }
 
@@ -309,10 +315,10 @@ void get_noncyclic_operations(std::map<Operation*,std::list<Operation*>>& adjace
     return;
 }
 
-void Kosarajus_algorithm_OPL(mlir::Operation* startOp, std::set<mlir::Operation*>& result) {
+void Kosarajus_algorithm_OPL(mlir::Operation* startOp, handshake::FuncOp *funcOp, std::set<mlir::Operation*>& result) {
     std::map<Operation*,std::list<Operation*>> adjacency_list;
     std::stack<Operation *> DFSstack;
-    create_adjacency_list_opl(startOp, adjacency_list, DFSstack);
+    create_adjacency_list_opl(startOp, adjacency_list, DFSstack, funcOp);
     std::vector<std::list<Operation*>> SCC = secondDFStravel(adjacency_list, DFSstack);
     get_noncyclic_operations(adjacency_list, SCC, result);
     return;
