@@ -4,7 +4,6 @@ add_dynamatic_library(ResourceSharingFCCM22
   modIR.cpp
   SharingSupport.cpp
   SharingFramework.cpp
-  NameUniquer.cpp
 
   DEPENDS
   DynamaticExperimentalTransformsPassIncGen
