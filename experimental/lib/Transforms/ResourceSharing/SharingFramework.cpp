@@ -61,13 +61,13 @@ void Set::joinSet(Set *joined_element) {
     }
 }
 // std::vector<mlir::Operation*> items;
-void Set::print(NameUniquer names) {
+void Set::print() {
     llvm::errs() << "Set id: " << SCC_id << "\n";
     int i = 0;
     for(auto group : groups) {
         llvm::errs() << "Group #" << i++ << "\n";
         for(auto op : group.items) {
-            llvm::errs() << names.getName(*op) << ", ";
+            llvm::errs() << op << ", ";
         }
         llvm::errs() << "\n";
     }
